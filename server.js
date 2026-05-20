@@ -101,7 +101,7 @@ app.post('/webhook', async (req, res) => {
           console.log(`Message from ${senderName} (${message.from}): ${userText}`);
 
           logLead(message.from, senderName, 'inbound', userText);
-          const reply = handleIncomingMessage(userText, senderName, message.from);
+          const reply = await handleIncomingMessage(userText, senderName, message.from);
           await sendWhatsAppMessage(message.from, reply);
           logLead(message.from, senderName, 'outbound', reply);
         }
@@ -361,13 +361,13 @@ app.put('/api/data/:businessId/bulk', (req, res) => {
   res.json({ success: true });
 });
 
-app.post('/chat', (req, res) => {
+app.post('/chat', async (req, res) => {
   try {
     const { message, sessionId, name } = req.body;
     if (!message) return res.status(400).json({ error: 'Message required' });
     const sid = sessionId || `web_${Date.now()}_${Math.random().toString(36).substr(2,9)}`;
     const userName = name || 'there';
-    const reply = handleIncomingMessage(message, userName, sid);
+    const reply = await handleIncomingMessage(message, userName, sid);
     res.json({ reply, sessionId: sid });
   } catch (err) {
     console.error('Chat API error:', err);

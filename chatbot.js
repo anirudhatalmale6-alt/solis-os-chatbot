@@ -1,4 +1,5 @@
 const { detectLanguage, getTranslation } = require('./translations');
+const { getAIResponse } = require('./ai');
 
 const conversations = new Map();
 const SESSION_TIMEOUT = 30 * 60 * 1000;
@@ -15,7 +16,7 @@ function getSession(phone) {
   return newSession;
 }
 
-function handleIncomingMessage(text, senderName, phone) {
+async function handleIncomingMessage(text, senderName, phone) {
   const session = getSession(phone);
   const input = text.toLowerCase().trim();
   const firstName = senderName.split(' ')[0];
@@ -46,6 +47,9 @@ function handleIncomingMessage(text, senderName, phone) {
     const reply = t[topicKey](firstName);
     return reply + '\n\n' + t.menu();
   }
+
+  const aiReply = await getAIResponse(text, phone, firstName, session.lang);
+  if (aiReply) return aiReply;
 
   return t.fallback(firstName);
 }
