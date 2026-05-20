@@ -34,7 +34,7 @@ function handleIncomingMessage(text, senderName, phone) {
     return t.welcomeGeneric(firstName);
   }
 
-  const numKeys = ['features','pricing','industries','getStarted','demo','booking','ai','language','support','human'];
+  const numKeys = ['features','pricing','industries','getStarted','demo','booking','ai','support','human'];
   const num = parseInt(input);
   if (num >= 1 && num <= numKeys.length && input === String(num)) {
     const reply = t[numKeys[num-1]](firstName);
