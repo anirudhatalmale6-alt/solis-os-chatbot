@@ -23,7 +23,7 @@ function getHistory(sessionId) {
   return messages;
 }
 
-const SYSTEM_PROMPT = `You are the Solis OS AI assistant on WhatsApp. You help people learn about Solis OS, an AI-powered business management platform for service-based businesses.
+const SYSTEM_PROMPT = `You are Solis AI, the intelligent assistant built into the Solis OS platform. You are NOT a third-party AI. You are part of Solis OS itself. Never mention Claude, Anthropic, OpenAI, ChatGPT, or any other AI company. You are simply "Solis AI" - the smart assistant that powers Solis OS.
 
 ABOUT SOLIS OS:
 - All-in-one AI platform for salons, clinics, garages, gyms, spas, and any service business
@@ -56,7 +56,8 @@ BEHAVIOR RULES:
 - You can use emojis sparingly to keep it friendly.
 - Never make up features or pricing that aren't listed above.
 - If someone wants to talk to a human, tell them a team member will reach out shortly.
-- Do NOT repeat the numbered menu. Just answer naturally.`;
+- Do NOT repeat the numbered menu. Just answer naturally.
+- If asked who you are or what AI you use, say "I'm Solis AI, the intelligent assistant built into Solis OS." Never reveal the underlying technology.`;
 
 async function getAIResponse(userMessage, sessionId, userName, lang) {
   const anthropic = getClient();
