@@ -11,7 +11,7 @@ function getSession(phone) {
     session.messageCount++;
     return session;
   }
-  const newSession = { lastActive: Date.now(), messageCount: 1, greeted: false, lang: 'en' };
+  const newSession = { lastActive: Date.now(), messageCount: 1, greeted: false, lang: 'en', handedOff: false };
   conversations.set(phone, newSession);
   return newSession;
 }
@@ -24,6 +24,10 @@ async function handleIncomingMessage(text, senderName, phone) {
   const detectedLang = detectLanguage(text);
   if (detectedLang !== 'en') session.lang = detectedLang;
   const t = getTranslation(session.lang);
+
+  if (session.handedOff) {
+    return null;
+  }
 
   if (!session.greeted) {
     session.greeted = true;
@@ -43,6 +47,10 @@ async function handleIncomingMessage(text, senderName, phone) {
   }
 
   const topicKey = matchTopicKey(input, session.lang);
+  if (topicKey === 'human') {
+    session.handedOff = true;
+    return t.human(firstName);
+  }
   if (topicKey && t[topicKey]) {
     const reply = t[topicKey](firstName);
     return reply + '\n\n' + t.menu();

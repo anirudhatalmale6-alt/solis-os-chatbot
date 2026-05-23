@@ -102,8 +102,10 @@ app.post('/webhook', async (req, res) => {
 
           logLead(message.from, senderName, 'inbound', userText);
           const reply = await handleIncomingMessage(userText, senderName, message.from);
-          await sendWhatsAppMessage(message.from, reply);
-          logLead(message.from, senderName, 'outbound', reply);
+          if (reply) {
+            await sendWhatsAppMessage(message.from, reply);
+            logLead(message.from, senderName, 'outbound', reply);
+          }
         }
       }
     }
@@ -368,6 +370,9 @@ app.post('/chat', async (req, res) => {
     const sid = sessionId || `web_${Date.now()}_${Math.random().toString(36).substr(2,9)}`;
     const userName = name || 'there';
     const reply = await handleIncomingMessage(message, userName, sid);
+    if (!reply) {
+      return res.json({ reply: "A support team member will be with you shortly. Thank you for your patience!", sessionId: sid, handedOff: true });
+    }
     res.json({ reply, sessionId: sid });
   } catch (err) {
     console.error('Chat API error:', err);
