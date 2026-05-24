@@ -377,6 +377,20 @@ app.post('/api/admin/reply', async (req, res) => {
   }
 });
 
+app.delete('/api/admin/leads/:phone', (req, res) => {
+  try {
+    const { phone } = req.params;
+    let leads = loadLeads();
+    const before = leads.length;
+    leads = leads.filter(m => m.phone !== phone);
+    fs.writeFileSync(LEADS_FILE, JSON.stringify(leads));
+    res.json({ success: true, deleted: before - leads.length });
+  } catch (err) {
+    console.error('Delete lead error:', err);
+    res.status(500).json({ error: 'Failed to delete' });
+  }
+});
+
 app.get('/admin/inbox', (req, res) => {
   res.sendFile(path.join(__dirname, 'inbox.html'));
 });
