@@ -35,6 +35,10 @@ async function handleIncomingMessage(text, senderName, phone) {
       return t.welcome(firstName);
     }
     const topicKey = matchTopicKey(input, session.lang);
+    if (topicKey === 'human') {
+      session.handedOff = true;
+      return t.human(firstName);
+    }
     if (topicKey && t[topicKey]) return t.welcomeWithAnswer(firstName, t[topicKey](firstName));
     return t.welcomeGeneric(firstName);
   }
@@ -42,6 +46,10 @@ async function handleIncomingMessage(text, senderName, phone) {
   const numKeys = ['features','pricing','industries','getStarted','demo','booking','ai','support','human'];
   const num = parseInt(input);
   if (num >= 1 && num <= numKeys.length && input === String(num)) {
+    if (numKeys[num-1] === 'human') {
+      session.handedOff = true;
+      return t.human(firstName);
+    }
     const reply = t[numKeys[num-1]](firstName);
     return reply + '\n\n' + t.menu();
   }
