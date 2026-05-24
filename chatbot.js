@@ -310,4 +310,14 @@ function matchTopicKey(input, lang) {
   return null;
 }
 
-module.exports = { handleIncomingMessage };
+function isHandedOff(phone) {
+  const session = conversations.get(phone);
+  return session ? session.handedOff : false;
+}
+
+function resumeBot(phone) {
+  const session = conversations.get(phone);
+  if (session) session.handedOff = false;
+}
+
+module.exports = { handleIncomingMessage, isHandedOff, resumeBot };

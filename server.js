@@ -2,7 +2,7 @@ require('dotenv').config();
 const express = require('express');
 const fs = require('fs');
 const path = require('path');
-const { handleIncomingMessage } = require('./chatbot');
+const { handleIncomingMessage, isHandedOff, resumeBot } = require('./chatbot');
 const { sendWhatsAppMessage } = require('./whatsapp');
 
 const WHATSAPP_DATA_FILE = path.join(__dirname, 'whatsapp_numbers.json');
@@ -158,6 +158,7 @@ app.get('/api/admin/leads', (req, res) => {
     if (m.name && m.name !== 'there') convos[m.phone].name = m.name;
   }
   const sorted = Object.values(convos).sort((a, b) => b.lastMessage.localeCompare(a.lastMessage));
+  sorted.forEach(c => { c.handedOff = isHandedOff(c.phone); });
   res.json({ conversations: sorted, totalMessages: leads.length, totalContacts: sorted.length });
 });
 
@@ -361,6 +362,23 @@ app.put('/api/data/:businessId/bulk', (req, res) => {
   Object.assign(data, items);
   saveBdata(req.params.businessId, data);
   res.json({ success: true });
+});
+
+app.post('/api/admin/reply', async (req, res) => {
+  try {
+    const { phone, message } = req.body;
+    if (!phone || !message) return res.status(400).json({ error: 'phone and message required' });
+    await sendWhatsAppMessage(phone, message);
+    logLead(phone, 'Support Agent', 'outbound', message);
+    res.json({ success: true });
+  } catch (err) {
+    console.error('Admin reply error:', err);
+    res.status(500).json({ error: 'Failed to send' });
+  }
+});
+
+app.get('/admin/inbox', (req, res) => {
+  res.sendFile(path.join(__dirname, 'inbox.html'));
 });
 
 app.post('/chat', async (req, res) => {
