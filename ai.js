@@ -36,6 +36,15 @@ ABOUT SOLIS OS:
 - App Store: https://apps.apple.com/app/solis-os/id6745498032
 - Google Play: https://play.google.com/store/apps/details?id=com.solisos
 
+SOLIS OS POS (Point of Sale System):
+- Full POS system for shops, cafes, salons, supermarkets, auto parts, restaurants, retail stores
+- Pricing: $239 AUD/year, everything included, 10-day free trial, no credit card required
+- Key features: Remote management from phone (manage your shop from anywhere), barcode scanning (camera or USB/Bluetooth), inventory & stock management with low stock alerts, daily/weekly/monthly sales reports, promotions & deals engine (BOGO, percentage off, fixed discounts), multi-staff with PIN access & permissions, loyalty program with barcode cards, customer management & purchase history, receipt printing & email receipts, custom branding & 8 theme presets, works offline without internet
+- How it works: Try free for 10 days in browser, subscribe at $239 AUD/year, download for offline use on any device
+- Remote management: Scan QR code in POS settings with phone, save to home screen, manage products/stock/promotions/sales/staff from anywhere
+- POS page: https://solis-os.com/pos.html
+- Try POS free: https://solis-os.com/app/
+
 KEY SELLING POINTS:
 - AI-powered scheduling optimizes appointment slots
 - Reduces no-shows by up to 80% with automated reminders
