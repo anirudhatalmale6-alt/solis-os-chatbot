@@ -50,7 +50,9 @@ async function handleIncomingMessage(text, senderName, phone) {
       session.handedOff = true;
       return t.human(firstName);
     }
-    const reply = t[numKeys[num-1]](firstName);
+    const key = numKeys[num-1];
+    const fn = t[key] || getTranslation('en')[key];
+    const reply = fn(firstName);
     return reply + '\n\n' + t.menu();
   }
 
