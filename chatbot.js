@@ -259,6 +259,19 @@ function matchTopicKey(input, lang) {
       ja: ['言語', '多言語', '翻訳', '日本語'],
       ko: ['언어', '다국어', '번역', '한국어']
     },
+    pos: {
+      en: ['pos', 'point of sale', 'point-of-sale', 'cash register', 'cashier', 'checkout system', 'sell products', 'shop system', 'retail', 'inventory', 'barcode', 'stock management', 'remote management', 'manage from phone', 'manage my shop'],
+      ar: ['نقطة بيع', 'كاشير', 'مبيعات', 'متجر', 'مخزون', 'باركود'],
+      fr: ['caisse', 'point de vente', 'vente', 'magasin', 'inventaire', 'code barre'],
+      es: ['punto de venta', 'caja', 'ventas', 'tienda', 'inventario', 'codigo de barras'],
+      de: ['kasse', 'kassensystem', 'verkauf', 'laden', 'inventar', 'barcode'],
+      it: ['cassa', 'punto vendita', 'vendita', 'negozio', 'inventario', 'codice a barre'],
+      pt: ['caixa', 'ponto de venda', 'venda', 'loja', 'estoque', 'codigo de barras'],
+      el: ['ταμειο', 'σημειο πωλησης', 'πωληση', 'καταστημα', 'αποθεμα'],
+      zh: ['收银', '销售点', '销售', '商店', '库存', '条码'],
+      ja: ['レジ', 'POS', '販売', '店舗', '在庫', 'バーコード'],
+      ko: ['POS', '판매', '매장', '재고', '바코드', '계산대']
+    },
     thanks: {
       en: ['thank', 'thanks', 'appreciate', 'cheers', 'great', 'perfect', 'awesome', 'amazing'],
       ar: ['شكرا', 'شكرًا', 'ممتاز', 'رائع', 'مثالي'],
