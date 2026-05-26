@@ -43,7 +43,7 @@ async function handleIncomingMessage(text, senderName, phone) {
     return t.welcomeGeneric(firstName);
   }
 
-  const numKeys = ['features','pricing','industries','getStarted','demo','booking','ai','support','human'];
+  const numKeys = ['features','pricing','industries','getStarted','demo','booking','ai','support','human','pos'];
   const num = parseInt(input);
   if (num >= 1 && num <= numKeys.length && input === String(num)) {
     if (numKeys[num-1] === 'human') {
