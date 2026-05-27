@@ -412,6 +412,36 @@ app.post('/chat', async (req, res) => {
   }
 });
 
+// POS Purchase - Square Checkout
+app.post('/api/pos/checkout', async (req, res) => {
+  try {
+    const { email } = req.body;
+    if (!email) return res.status(400).json({ error: 'Email is required' });
+    const SQUARE_TOKEN = process.env.SQUARE_ACCESS_TOKEN;
+    const SQUARE_LOCATION = process.env.SQUARE_LOCATION_ID;
+    if (!SQUARE_TOKEN || !SQUARE_LOCATION) return res.status(503).json({ error: 'Payment system not configured' });
+    const idempotencyKey = `pos_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
+    const body = {
+      idempotency_key: idempotencyKey,
+      order: {
+        location_id: SQUARE_LOCATION,
+        line_items: [{ name: 'Solis OS POS — Annual Subscription', quantity: '1', base_price_money: { amount: 23900, currency: 'AUD' } }],
+      },
+      checkout_options: { redirect_url: `https://solis-os.com/purchase-success.html?email=${encodeURIComponent(email)}` },
+      pre_populated_data: { buyer_email: email },
+    };
+    const resp = await fetch('https://connect.squareup.com/v2/online-checkout/payment-links', {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${SQUARE_TOKEN}`, 'Content-Type': 'application/json', 'Square-Version': '2024-12-18' },
+      body: JSON.stringify(body),
+    });
+    const data = await resp.json();
+    if (!resp.ok) { console.error('Square checkout error:', JSON.stringify(data)); return res.status(500).json({ error: 'Payment link creation failed', details: data.errors }); }
+    const link = data.payment_link || {};
+    res.json({ checkout_url: link.long_url || link.url || '', order_id: link.order_id || '' });
+  } catch (err) { console.error('Checkout error:', err); res.status(500).json({ error: 'Internal error' }); }
+});
+
 if (require.main === module) {
   const PORT = process.env.PORT || 3000;
   app.listen(PORT, () => {
