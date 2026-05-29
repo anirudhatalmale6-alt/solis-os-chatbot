@@ -416,17 +416,76 @@ app.post('/chat', async (req, res) => {
 const POS_DATA_DIR = path.join(__dirname, 'pos_sync_data');
 if (!fs.existsSync(POS_DATA_DIR)) fs.mkdirSync(POS_DATA_DIR, { recursive: true });
 
+function mergeRecords(existing, incoming) {
+  const map = {};
+  (existing || []).forEach(r => { if (r.syncId) map[r.syncId] = r; });
+  (incoming || []).forEach(r => {
+    if (!r.syncId) return;
+    const ex = map[r.syncId];
+    if (!ex || (r.updatedAt && (!ex.updatedAt || r.updatedAt > ex.updatedAt))) {
+      map[r.syncId] = r;
+    }
+  });
+  return Object.values(map);
+}
+
+const SYNC_MAP_FILE = path.join(POS_DATA_DIR, '_email_sync_map.json');
+function loadSyncMap() { try { return JSON.parse(fs.readFileSync(SYNC_MAP_FILE, 'utf8')); } catch { return {}; } }
+function saveSyncMap(m) { fs.writeFileSync(SYNC_MAP_FILE, JSON.stringify(m)); }
+
+app.post('/api/pos/register-sync', (req, res) => {
+  try {
+    const { email, syncCode } = req.body;
+    if (!email || !syncCode) return res.status(400).json({ error: 'email and syncCode required' });
+    const map = loadSyncMap();
+    map[email.toLowerCase()] = syncCode.toUpperCase();
+    saveSyncMap(map);
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to register' });
+  }
+});
+
+app.get('/api/pos/lookup-sync/:email', (req, res) => {
+  try {
+    const map = loadSyncMap();
+    const code = map[req.params.email.toLowerCase()];
+    if (!code) return res.json({ syncCode: null });
+    const filePath = path.join(POS_DATA_DIR, `${code}.json`);
+    const exists = fs.existsSync(filePath);
+    res.json({ syncCode: exists ? code : null });
+  } catch (err) {
+    res.status(500).json({ error: 'Lookup failed' });
+  }
+});
+
 app.post('/api/pos/sync', (req, res) => {
   try {
-    const { syncCode, businessName, data, products, promotions, staff, customers } = req.body;
+    const { syncCode, businessName, data, products, promotions, staff, customers, sales, settings, email } = req.body;
     if (!syncCode || !data) return res.status(400).json({ error: 'syncCode and data required' });
-    const filePath = path.join(POS_DATA_DIR, `${syncCode.toUpperCase()}.json`);
-    const payload = { businessName: businessName || 'My Business', data, syncedAt: new Date().toISOString() };
-    if (products !== undefined) payload.products = products;
-    if (promotions !== undefined) payload.promotions = promotions;
-    if (staff !== undefined) payload.staff = staff;
-    if (customers !== undefined) payload.customers = customers;
+    const code = syncCode.toUpperCase();
+    const filePath = path.join(POS_DATA_DIR, `${code}.json`);
+    let existing = {};
+    try { existing = JSON.parse(fs.readFileSync(filePath, 'utf8')); } catch {}
+    const payload = { businessName: businessName || existing.businessName || 'My Business', data, syncedAt: new Date().toISOString() };
+    if (products !== undefined) payload.products = mergeRecords(existing.products, products);
+    else if (existing.products) payload.products = existing.products;
+    if (promotions !== undefined) payload.promotions = mergeRecords(existing.promotions, promotions);
+    else if (existing.promotions) payload.promotions = existing.promotions;
+    if (staff !== undefined) payload.staff = mergeRecords(existing.staff, staff);
+    else if (existing.staff) payload.staff = existing.staff;
+    if (customers !== undefined) payload.customers = mergeRecords(existing.customers, customers);
+    else if (existing.customers) payload.customers = existing.customers;
+    if (sales !== undefined) payload.sales = mergeRecords(existing.sales, sales);
+    else if (existing.sales) payload.sales = existing.sales;
+    if (settings !== undefined) payload.settings = settings;
+    else if (existing.settings) payload.settings = existing.settings;
     fs.writeFileSync(filePath, JSON.stringify(payload));
+    if (email) {
+      const map = loadSyncMap();
+      map[email.toLowerCase()] = code;
+      saveSyncMap(map);
+    }
     res.json({ success: true, syncedAt: payload.syncedAt });
   } catch (err) {
     console.error('POS sync error:', err);
@@ -452,6 +511,27 @@ app.get('/api/pos/dashboard/:syncCode', (req, res) => {
   } catch (err) {
     console.error('Dashboard data error:', err);
     res.status(500).json({ error: 'Failed to load data' });
+  }
+});
+
+app.get('/api/pos/pull/:syncCode', (req, res) => {
+  try {
+    const code = req.params.syncCode.toUpperCase();
+    const filePath = path.join(POS_DATA_DIR, `${code}.json`);
+    if (!fs.existsSync(filePath)) return res.json({ products: [], sales: [], customers: [], staff: [], promotions: [], settings: {} });
+    const payload = JSON.parse(fs.readFileSync(filePath, 'utf8'));
+    res.json({
+      products: payload.products || [],
+      sales: payload.sales || [],
+      customers: payload.customers || [],
+      staff: payload.staff || [],
+      promotions: payload.promotions || [],
+      settings: payload.settings || {},
+      syncedAt: payload.syncedAt,
+    });
+  } catch (err) {
+    console.error('Pull data error:', err);
+    res.status(500).json({ error: 'Failed to pull data' });
   }
 });
 
