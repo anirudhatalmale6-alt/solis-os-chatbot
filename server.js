@@ -639,17 +639,13 @@ app.post('/api/pos/send-reset-code', async (req, res) => {
         text: plainText,
         html: htmlEmail,
       });
+      console.log(`Branded email sent to: ${email}`);
+      res.json({ success: true, method: 'branded' });
+      return;
     } catch (mailErr) {
-      console.log('SMTP not configured, falling back to Supabase OTP email');
-      const SB_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImpvZWtsZ3BuY2JyaG51anpkenNwIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzgzNTA1ODksImV4cCI6MjA5MzkyNjU4OX0.p4hS6hpKaweZRDIZbeuWb6-c0NL7irtTJ_HXOZmdTmY';
-      await fetch(`${SUPABASE_URL}/auth/v1/otp`, {
-        method: 'POST',
-        headers: { 'apikey': SB_ANON_KEY, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: email.toLowerCase(), create_user: false }),
-      });
+      console.error('SMTP error:', mailErr.message);
+      res.json({ success: true, method: 'fallback', smtpError: mailErr.message });
     }
-    console.log(`Reset code sent to: ${email}`);
-    res.json({ success: true });
   } catch (err) {
     console.error('Send reset code error:', err);
     res.status(500).json({ error: 'Internal error' });
