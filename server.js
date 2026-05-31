@@ -637,10 +637,12 @@ app.post('/api/pos/send-reset-code', async (req, res) => {
 </td></tr>
 </table>
 </body></html>`;
-    const transporter = nodemailer.createTransport({ host: 'smtp.gmail.com', port: 587, secure: false, auth: { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS } });
+    const smtpUser = process.env.SMTP_USER || 'Solis.os.support@gmail.com';
+    const smtpPass = process.env.SMTP_PASS || 'xdjjbbzvxsxpjvin';
+    const transporter = nodemailer.createTransport({ host: 'smtp.gmail.com', port: 587, secure: false, auth: { user: smtpUser, pass: smtpPass } });
     try {
       await transporter.sendMail({
-        from: `"Solis OS" <${process.env.SMTP_USER || 'noreply@solis-os.com'}>`,
+        from: `"Solis OS" <${smtpUser}>`,
         to: email.toLowerCase(),
         subject: 'Solis OS POS — Password Reset Code',
         html: htmlEmail,
