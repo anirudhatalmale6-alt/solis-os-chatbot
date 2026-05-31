@@ -2,6 +2,7 @@ require('dotenv').config();
 const express = require('express');
 const fs = require('fs');
 const path = require('path');
+const nodemailer = require('nodemailer');
 const { handleIncomingMessage, isHandedOff, resumeBot } = require('./chatbot');
 const { sendWhatsAppMessage } = require('./whatsapp');
 
@@ -429,6 +430,8 @@ function mergeRecords(existing, incoming) {
   return Object.values(map);
 }
 
+const RESET_CODES = new Map();
+
 const SYNC_MAP_FILE = path.join(POS_DATA_DIR, '_email_sync_map.json');
 function loadSyncMap() { try { return JSON.parse(fs.readFileSync(SYNC_MAP_FILE, 'utf8')); } catch { return {}; } }
 function saveSyncMap(m) { fs.writeFileSync(SYNC_MAP_FILE, JSON.stringify(m)); }
@@ -581,30 +584,75 @@ app.delete('/api/pos/remote/:syncCode', (req, res) => {
   }
 });
 
-// POS Password Reset - Step 1: Send verification code to email
+// POS Password Reset - Send branded email with verification code
 app.post('/api/pos/send-reset-code', async (req, res) => {
   try {
     const { email } = req.body;
     if (!email) return res.status(400).json({ error: 'Email is required' });
     const SUPABASE_URL = process.env.SUPABASE_URL || 'https://joeklgpncbrhnujzdzsp.supabase.co';
-    const SB_ANON_KEY = process.env.SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImpvZWtsZ3BuY2JyaG51anpkenNwIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzgzNTA1ODksImV4cCI6MjA5MzkyNjU4OX0.p4hS6hpKaweZRDIZbeuWb6-c0NL7irtTJ_HXOZmdTmY';
     const SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImpvZWtsZ3BuY2JyaG51anpkenNwIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3ODM1MDU4OSwiZXhwIjoyMDkzOTI2NTg5fQ.qSjr5JCxcw0wzl3_IypMMxWQhFl5FJ4IskiH04YPmiI';
-    if (!SERVICE_ROLE_KEY) return res.status(500).json({ error: 'Server not configured' });
     const usersResp = await fetch(`${SUPABASE_URL}/auth/v1/admin/users?page=1&per_page=200`, {
       headers: { 'Authorization': `Bearer ${SERVICE_ROLE_KEY}`, 'apikey': SERVICE_ROLE_KEY },
     });
     const usersData = await usersResp.json();
     const user = (usersData.users || []).find(u => u.email && u.email.toLowerCase() === email.toLowerCase());
     if (!user) return res.status(404).json({ error: 'No account found with this email' });
-    const otpResp = await fetch(`${SUPABASE_URL}/auth/v1/otp`, {
+    const linkResp = await fetch(`${SUPABASE_URL}/auth/v1/admin/generate_link`, {
       method: 'POST',
-      headers: { 'apikey': SB_ANON_KEY, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email: email.toLowerCase(), create_user: false }),
+      headers: { 'Authorization': `Bearer ${SERVICE_ROLE_KEY}`, 'apikey': SERVICE_ROLE_KEY, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ type: 'recovery', email: email.toLowerCase() }),
     });
-    if (!otpResp.ok) {
-      const d = await otpResp.json();
-      if (d.error_code === 'over_email_send_rate_limit') return res.status(429).json({ error: 'Please wait 60 seconds before requesting another code' });
-      return res.status(500).json({ error: d.msg || d.message || 'Failed to send code' });
+    if (!linkResp.ok) return res.status(500).json({ error: 'Failed to generate reset code' });
+    const linkData = await linkResp.json();
+    const otp = linkData.email_otp;
+    if (!otp) return res.status(500).json({ error: 'Failed to generate code' });
+    RESET_CODES.set(email.toLowerCase(), { code: otp, expires: Date.now() + 3600000 });
+    setTimeout(() => RESET_CODES.delete(email.toLowerCase()), 3600000);
+    const resetLink = `https://solis-os.com/app/?reset=${encodeURIComponent(email.toLowerCase())}`;
+    const htmlEmail = `
+<!DOCTYPE html>
+<html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>
+<body style="margin:0;padding:0;background:#f7f8fc;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif">
+<table width="100%" cellpadding="0" cellspacing="0" style="background:#f7f8fc;padding:40px 20px">
+<tr><td align="center">
+<table width="480" cellpadding="0" cellspacing="0" style="background:#ffffff;border-radius:16px;overflow:hidden;box-shadow:0 4px 24px rgba(0,0,0,0.08)">
+<tr><td style="background:linear-gradient(135deg,#1a1d2e 0%,#2d3148 100%);padding:32px 40px;text-align:center">
+<h1 style="margin:0;font-size:28px;font-weight:800;color:#ffffff;letter-spacing:-0.5px">Solis OS <span style="color:#f59e0b">POS</span></h1>
+</td></tr>
+<tr><td style="padding:40px">
+<h2 style="margin:0 0 8px;font-size:22px;font-weight:700;color:#1a1d2e">Password Reset</h2>
+<p style="margin:0 0 24px;font-size:15px;color:#6b7280;line-height:1.6">You requested to reset your password. Use the verification code below in the app:</p>
+<div style="background:#f7f8fc;border:2px solid #e8e9ef;border-radius:12px;padding:24px;text-align:center;margin:0 0 24px">
+<p style="margin:0 0 8px;font-size:12px;font-weight:600;color:#9ca3af;text-transform:uppercase;letter-spacing:1px">Verification Code</p>
+<p style="margin:0;font-size:36px;font-weight:800;color:#1a1d2e;letter-spacing:8px;font-family:monospace">${otp}</p>
+</div>
+<a href="${resetLink}" style="display:block;background:linear-gradient(135deg,#f59e0b,#d97706);color:#ffffff;text-decoration:none;padding:16px;border-radius:12px;text-align:center;font-size:16px;font-weight:700;margin:0 0 24px">Open Solis OS POS</a>
+<p style="margin:0 0 4px;font-size:13px;color:#9ca3af;line-height:1.5">This code expires in 60 minutes.</p>
+<p style="margin:0;font-size:13px;color:#9ca3af;line-height:1.5">If you didn't request this, you can safely ignore this email.</p>
+</td></tr>
+<tr><td style="background:#f7f8fc;padding:24px 40px;text-align:center;border-top:1px solid #e8e9ef">
+<p style="margin:0;font-size:12px;color:#9ca3af">&copy; 2026 Solis OS. All rights reserved.</p>
+</td></tr>
+</table>
+</td></tr>
+</table>
+</body></html>`;
+    const transporter = nodemailer.createTransport({ host: 'smtp.gmail.com', port: 587, secure: false, auth: { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS } });
+    try {
+      await transporter.sendMail({
+        from: `"Solis OS" <${process.env.SMTP_USER || 'noreply@solis-os.com'}>`,
+        to: email.toLowerCase(),
+        subject: 'Solis OS POS — Password Reset Code',
+        html: htmlEmail,
+      });
+    } catch (mailErr) {
+      console.log('SMTP not configured, falling back to Supabase OTP email');
+      const SB_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImpvZWtsZ3BuY2JyaG51anpkenNwIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzgzNTA1ODksImV4cCI6MjA5MzkyNjU4OX0.p4hS6hpKaweZRDIZbeuWb6-c0NL7irtTJ_HXOZmdTmY';
+      await fetch(`${SUPABASE_URL}/auth/v1/otp`, {
+        method: 'POST',
+        headers: { 'apikey': SB_ANON_KEY, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: email.toLowerCase(), create_user: false }),
+      });
     }
     console.log(`Reset code sent to: ${email}`);
     res.json({ success: true });
@@ -614,22 +662,19 @@ app.post('/api/pos/send-reset-code', async (req, res) => {
   }
 });
 
-// POS Password Reset - Step 2: Verify code and reset password
+// POS Password Reset - Verify code and reset password
 app.post('/api/pos/reset-password', async (req, res) => {
   try {
     const { email, code, newPassword } = req.body;
     if (!email || !code || !newPassword) return res.status(400).json({ error: 'Email, verification code, and new password are required' });
     if (newPassword.length < 6) return res.status(400).json({ error: 'Password must be at least 6 characters' });
     const SUPABASE_URL = process.env.SUPABASE_URL || 'https://joeklgpncbrhnujzdzsp.supabase.co';
-    const SB_ANON_KEY = process.env.SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImpvZWtsZ3BuY2JyaG51anpkenNwIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzgzNTA1ODksImV4cCI6MjA5MzkyNjU4OX0.p4hS6hpKaweZRDIZbeuWb6-c0NL7irtTJ_HXOZmdTmY';
     const SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImpvZWtsZ3BuY2JyaG51anpkenNwIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3ODM1MDU4OSwiZXhwIjoyMDkzOTI2NTg5fQ.qSjr5JCxcw0wzl3_IypMMxWQhFl5FJ4IskiH04YPmiI';
-    if (!SERVICE_ROLE_KEY) return res.status(500).json({ error: 'Server not configured' });
-    const verifyResp = await fetch(`${SUPABASE_URL}/auth/v1/token?grant_type=email`, {
-      method: 'POST',
-      headers: { 'apikey': SB_ANON_KEY, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email: email.toLowerCase(), token: code }),
-    });
-    if (!verifyResp.ok) return res.status(403).json({ error: 'Invalid or expired code. Please request a new one.' });
+    const stored = RESET_CODES.get(email.toLowerCase());
+    if (!stored || stored.code !== code || Date.now() > stored.expires) {
+      return res.status(403).json({ error: 'Invalid or expired code. Please request a new one.' });
+    }
+    RESET_CODES.delete(email.toLowerCase());
     const usersResp = await fetch(`${SUPABASE_URL}/auth/v1/admin/users?page=1&per_page=200`, {
       headers: { 'Authorization': `Bearer ${SERVICE_ROLE_KEY}`, 'apikey': SERVICE_ROLE_KEY },
     });
