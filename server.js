@@ -585,6 +585,110 @@ app.delete('/api/pos/remote/:syncCode', (req, res) => {
 });
 
 // POS Password Reset - Send branded email with verification code
+// Payment Terminal Endpoints
+app.post('/api/pos/terminal/test', async (req, res) => {
+  try {
+    const { provider, publishableKey, secretKey, accessToken, locationId, apiKey, merchantCode, merchantId, terminalId, integrationKey, clientId, clientSecret } = req.body;
+    if (!provider) return res.status(400).json({ error: 'Provider is required' });
+    if (provider === 'stripe') {
+      if (!secretKey) return res.json({ success: false, error: 'Secret key is required' });
+      const r = await fetch('https://api.stripe.com/v1/terminal/locations', { headers: { 'Authorization': `Bearer ${secretKey}` } });
+      if (r.ok) { const d = await r.json(); return res.json({ success: true, details: `${d.data?.length || 0} location(s) found` }); }
+      const e = await r.json(); return res.json({ success: false, error: e.error?.message || 'Invalid API key' });
+    }
+    if (provider === 'square') {
+      if (!accessToken) return res.json({ success: false, error: 'Access token is required' });
+      const r = await fetch('https://connect.squareup.com/v2/locations', { headers: { 'Authorization': `Bearer ${accessToken}`, 'Square-Version': '2024-01-18' } });
+      if (r.ok) { const d = await r.json(); return res.json({ success: true, details: `${d.locations?.length || 0} location(s) found` }); }
+      return res.json({ success: false, error: 'Invalid access token' });
+    }
+    if (provider === 'sumup') {
+      if (!apiKey) return res.json({ success: false, error: 'API key is required' });
+      const r = await fetch('https://api.sumup.com/v0.1/me', { headers: { 'Authorization': `Bearer ${apiKey}` } });
+      if (r.ok) { const d = await r.json(); return res.json({ success: true, details: `Merchant: ${d.merchant_profile?.merchant_code || merchantCode || 'OK'}` }); }
+      return res.json({ success: false, error: 'Invalid API key' });
+    }
+    if (provider === 'tyro') {
+      if (!merchantId || !integrationKey) return res.json({ success: false, error: 'Merchant ID and Integration Key required' });
+      return res.json({ success: true, details: 'Tyro credentials saved. Will connect to terminal during checkout.' });
+    }
+    if (provider === 'zettle') {
+      if (!clientId || !clientSecret) return res.json({ success: false, error: 'Client ID and Secret required' });
+      const r = await fetch('https://oauth.zettle.com/token', { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: `grant_type=client_credentials&client_id=${encodeURIComponent(clientId)}&client_secret=${encodeURIComponent(clientSecret)}` });
+      if (r.ok) return res.json({ success: true, details: 'Zettle authentication successful' });
+      return res.json({ success: false, error: 'Invalid credentials' });
+    }
+    res.json({ success: false, error: 'Unknown provider' });
+  } catch (err) { console.error('Terminal test error:', err); res.status(500).json({ success: false, error: err.message }); }
+});
+
+app.post('/api/pos/terminal/stripe/connection-token', async (req, res) => {
+  try {
+    const { secretKey } = req.body;
+    if (!secretKey) return res.status(400).json({ error: 'Secret key required' });
+    const r = await fetch('https://api.stripe.com/v1/terminal/connection_tokens', { method: 'POST', headers: { 'Authorization': `Bearer ${secretKey}`, 'Content-Type': 'application/x-www-form-urlencoded' } });
+    const d = await r.json();
+    if (d.secret) return res.json({ secret: d.secret });
+    res.status(400).json({ error: d.error?.message || 'Failed to create token' });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.post('/api/pos/terminal/stripe/payment-intent', async (req, res) => {
+  try {
+    const { secretKey, amount, currency } = req.body;
+    if (!secretKey || !amount) return res.status(400).json({ error: 'Secret key and amount required' });
+    const params = new URLSearchParams({ amount: String(amount), currency: currency || 'usd', 'payment_method_types[]': 'card_present', capture_method: 'automatic' });
+    const r = await fetch('https://api.stripe.com/v1/payment_intents', { method: 'POST', headers: { 'Authorization': `Bearer ${secretKey}`, 'Content-Type': 'application/x-www-form-urlencoded' }, body: params.toString() });
+    const d = await r.json();
+    if (d.client_secret) return res.json({ client_secret: d.client_secret, id: d.id });
+    res.status(400).json({ error: d.error?.message || 'Failed to create payment' });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.post('/api/pos/terminal/process', async (req, res) => {
+  try {
+    const { provider, amount, currency, accessToken, locationId, deviceId, apiKey, merchantCode, merchantId, terminalId, integrationKey, clientId, clientSecret } = req.body;
+    if (!provider || !amount) return res.status(400).json({ error: 'Provider and amount required' });
+
+    if (provider === 'square') {
+      const body = { checkout: { amount_money: { amount: Math.round(amount * 100), currency: (currency || 'usd').toUpperCase() }, device_options: { device_id: deviceId } }, idempotency_key: `pos-${Date.now()}-${Math.random().toString(36).slice(2)}` };
+      const r = await fetch(`https://connect.squareup.com/v2/terminals/checkouts`, { method: 'POST', headers: { 'Authorization': `Bearer ${accessToken}`, 'Square-Version': '2024-01-18', 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+      const d = await r.json();
+      if (d.checkout) return res.json({ success: true, id: d.checkout.id, status: d.checkout.status });
+      return res.json({ success: false, error: d.errors?.[0]?.detail || 'Square checkout failed' });
+    }
+
+    if (provider === 'sumup') {
+      const body = { checkout_reference: `pos-${Date.now()}`, amount, currency: (currency || 'usd').toUpperCase(), merchant_code: merchantCode, description: 'POS Sale' };
+      const r = await fetch('https://api.sumup.com/v0.1/checkouts', { method: 'POST', headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+      const d = await r.json();
+      if (d.id) return res.json({ success: true, id: d.id, status: d.status });
+      return res.json({ success: false, error: d.message || 'SumUp checkout failed' });
+    }
+
+    if (provider === 'tyro') {
+      const body = { amount: Math.round(amount * 100), merchantId, terminalId, transactionType: 'PURCHASE', integratedReceipt: false };
+      const r = await fetch('https://api.tyro.com/connect/pay/transactions', { method: 'POST', headers: { 'Authorization': `Bearer ${integrationKey}`, 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+      const d = await r.json();
+      if (d.transactionId) return res.json({ success: true, id: d.transactionId, status: d.status });
+      return res.json({ success: false, error: d.message || 'Tyro transaction failed' });
+    }
+
+    if (provider === 'zettle') {
+      const tokenResp = await fetch('https://oauth.zettle.com/token', { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: `grant_type=client_credentials&client_id=${encodeURIComponent(clientId)}&client_secret=${encodeURIComponent(clientSecret)}` });
+      const tokenData = await tokenResp.json();
+      if (!tokenData.access_token) return res.json({ success: false, error: 'Zettle auth failed' });
+      const body = { purchaseUUID: `pos-${Date.now()}-${Math.random().toString(36).slice(2)}`, amount: Math.round(amount * 100), title: 'POS Sale' };
+      const r = await fetch('https://purchase.izettle.com/purchases/v2', { method: 'POST', headers: { 'Authorization': `Bearer ${tokenData.access_token}`, 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+      const d = await r.json();
+      if (d.purchaseUUID || r.ok) return res.json({ success: true, id: d.purchaseUUID || body.purchaseUUID });
+      return res.json({ success: false, error: d.developerMessage || 'Zettle payment failed' });
+    }
+
+    res.json({ success: false, error: 'Unknown provider' });
+  } catch (err) { console.error('Terminal process error:', err); res.status(500).json({ success: false, error: err.message }); }
+});
+
 app.post('/api/pos/send-reset-code', async (req, res) => {
   try {
     const { email } = req.body;
