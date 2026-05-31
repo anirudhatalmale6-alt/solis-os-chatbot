@@ -581,6 +581,40 @@ app.delete('/api/pos/remote/:syncCode', (req, res) => {
   }
 });
 
+// POS Password Reset (bypasses Supabase emails)
+app.post('/api/pos/reset-password', async (req, res) => {
+  try {
+    const { email, syncCode, newPassword } = req.body;
+    if (!email || !syncCode || !newPassword) return res.status(400).json({ error: 'Email, sync code, and new password are required' });
+    if (newPassword.length < 6) return res.status(400).json({ error: 'Password must be at least 6 characters' });
+    const map = loadSyncMap();
+    const storedCode = map[email.toLowerCase()];
+    if (!storedCode || storedCode !== syncCode.toUpperCase()) {
+      return res.status(403).json({ error: 'Email and sync code do not match. Check your sync code in the POS settings on another device.' });
+    }
+    const SUPABASE_URL = process.env.SUPABASE_URL || 'https://joeklgpncbrhnujzdzsp.supabase.co';
+    const SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
+    if (!SERVICE_ROLE_KEY) return res.status(500).json({ error: 'Server not configured' });
+    const usersResp = await fetch(`${SUPABASE_URL}/auth/v1/admin/users?page=1&per_page=200`, {
+      headers: { 'Authorization': `Bearer ${SERVICE_ROLE_KEY}`, 'apikey': SERVICE_ROLE_KEY },
+    });
+    const usersData = await usersResp.json();
+    const user = (usersData.users || []).find(u => u.email && u.email.toLowerCase() === email.toLowerCase());
+    if (!user) return res.status(404).json({ error: 'No account found with this email' });
+    const updateResp = await fetch(`${SUPABASE_URL}/auth/v1/admin/users/${user.id}`, {
+      method: 'PUT',
+      headers: { 'Authorization': `Bearer ${SERVICE_ROLE_KEY}`, 'apikey': SERVICE_ROLE_KEY, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ password: newPassword }),
+    });
+    if (!updateResp.ok) { const d = await updateResp.json(); return res.status(500).json({ error: d.msg || d.message || 'Password reset failed' }); }
+    console.log(`Password reset: ${email}`);
+    res.json({ success: true });
+  } catch (err) {
+    console.error('Password reset error:', err);
+    res.status(500).json({ error: 'Internal error' });
+  }
+});
+
 // POS Purchase - Activate account after payment
 app.post('/api/pos/activate', (req, res) => {
   try {
