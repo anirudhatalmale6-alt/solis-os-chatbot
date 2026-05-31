@@ -581,15 +581,55 @@ app.delete('/api/pos/remote/:syncCode', (req, res) => {
   }
 });
 
-// POS Password Reset (bypasses Supabase emails)
-app.post('/api/pos/reset-password', async (req, res) => {
+// POS Password Reset - Step 1: Send verification code to email
+app.post('/api/pos/send-reset-code', async (req, res) => {
   try {
-    const { email, newPassword } = req.body;
-    if (!email || !newPassword) return res.status(400).json({ error: 'Email and new password are required' });
-    if (newPassword.length < 6) return res.status(400).json({ error: 'Password must be at least 6 characters' });
+    const { email } = req.body;
+    if (!email) return res.status(400).json({ error: 'Email is required' });
     const SUPABASE_URL = process.env.SUPABASE_URL || 'https://joeklgpncbrhnujzdzsp.supabase.co';
+    const SB_ANON_KEY = process.env.SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImpvZWtsZ3BuY2JyaG51anpkenNwIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzgzNTA1ODksImV4cCI6MjA5MzkyNjU4OX0.p4hS6hpKaweZRDIZbeuWb6-c0NL7irtTJ_HXOZmdTmY';
     const SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
     if (!SERVICE_ROLE_KEY) return res.status(500).json({ error: 'Server not configured' });
+    const usersResp = await fetch(`${SUPABASE_URL}/auth/v1/admin/users?page=1&per_page=200`, {
+      headers: { 'Authorization': `Bearer ${SERVICE_ROLE_KEY}`, 'apikey': SERVICE_ROLE_KEY },
+    });
+    const usersData = await usersResp.json();
+    const user = (usersData.users || []).find(u => u.email && u.email.toLowerCase() === email.toLowerCase());
+    if (!user) return res.status(404).json({ error: 'No account found with this email' });
+    const otpResp = await fetch(`${SUPABASE_URL}/auth/v1/otp`, {
+      method: 'POST',
+      headers: { 'apikey': SB_ANON_KEY, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: email.toLowerCase(), create_user: false }),
+    });
+    if (!otpResp.ok) {
+      const d = await otpResp.json();
+      if (d.error_code === 'over_email_send_rate_limit') return res.status(429).json({ error: 'Please wait 60 seconds before requesting another code' });
+      return res.status(500).json({ error: d.msg || d.message || 'Failed to send code' });
+    }
+    console.log(`Reset code sent to: ${email}`);
+    res.json({ success: true });
+  } catch (err) {
+    console.error('Send reset code error:', err);
+    res.status(500).json({ error: 'Internal error' });
+  }
+});
+
+// POS Password Reset - Step 2: Verify code and reset password
+app.post('/api/pos/reset-password', async (req, res) => {
+  try {
+    const { email, code, newPassword } = req.body;
+    if (!email || !code || !newPassword) return res.status(400).json({ error: 'Email, verification code, and new password are required' });
+    if (newPassword.length < 6) return res.status(400).json({ error: 'Password must be at least 6 characters' });
+    const SUPABASE_URL = process.env.SUPABASE_URL || 'https://joeklgpncbrhnujzdzsp.supabase.co';
+    const SB_ANON_KEY = process.env.SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImpvZWtsZ3BuY2JyaG51anpkenNwIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzgzNTA1ODksImV4cCI6MjA5MzkyNjU4OX0.p4hS6hpKaweZRDIZbeuWb6-c0NL7irtTJ_HXOZmdTmY';
+    const SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
+    if (!SERVICE_ROLE_KEY) return res.status(500).json({ error: 'Server not configured' });
+    const verifyResp = await fetch(`${SUPABASE_URL}/auth/v1/token?grant_type=email`, {
+      method: 'POST',
+      headers: { 'apikey': SB_ANON_KEY, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: email.toLowerCase(), token: code }),
+    });
+    if (!verifyResp.ok) return res.status(403).json({ error: 'Invalid or expired code. Please request a new one.' });
     const usersResp = await fetch(`${SUPABASE_URL}/auth/v1/admin/users?page=1&per_page=200`, {
       headers: { 'Authorization': `Bearer ${SERVICE_ROLE_KEY}`, 'apikey': SERVICE_ROLE_KEY },
     });
@@ -602,7 +642,7 @@ app.post('/api/pos/reset-password', async (req, res) => {
       body: JSON.stringify({ password: newPassword }),
     });
     if (!updateResp.ok) { const d = await updateResp.json(); return res.status(500).json({ error: d.msg || d.message || 'Password reset failed' }); }
-    console.log(`Password reset: ${email}`);
+    console.log(`Password reset verified: ${email}`);
     res.json({ success: true });
   } catch (err) {
     console.error('Password reset error:', err);
