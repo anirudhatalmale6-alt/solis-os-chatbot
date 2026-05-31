@@ -606,6 +606,9 @@ app.post('/api/pos/send-reset-code', async (req, res) => {
     if (!recoverResp.ok) {
       const errData = await recoverResp.json().catch(() => ({}));
       console.error('Recovery email error:', errData);
+      if (recoverResp.status === 429) {
+        return res.status(429).json({ error: 'Please wait a minute before requesting another code.' });
+      }
       return res.status(500).json({ error: errData.msg || 'Failed to send reset email' });
     }
     console.log(`Recovery email sent via Supabase to: ${email}`);
