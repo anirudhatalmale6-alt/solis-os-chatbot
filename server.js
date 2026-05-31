@@ -578,6 +578,48 @@ app.delete('/api/pos/remote/:syncCode', (req, res) => {
   }
 });
 
+// POS Purchase - Activate account after payment
+app.post('/api/pos/activate', (req, res) => {
+  try {
+    const { email } = req.body;
+    if (!email) return res.status(400).json({ error: 'Email is required' });
+    const map = loadSyncMap();
+    const syncCode = map[email.toLowerCase()];
+    if (!syncCode) {
+      return res.json({ success: true, note: 'No sync code yet — will activate on next login' });
+    }
+    const filePath = path.join(POS_DATA_DIR, `${syncCode}.json`);
+    let payload = {};
+    try { payload = JSON.parse(fs.readFileSync(filePath, 'utf8')); } catch {}
+    if (!payload.settings) payload.settings = {};
+    payload.settings.purchased = true;
+    payload.settings.purchasedAt = new Date().toISOString();
+    payload.settings.purchasedEmail = email.toLowerCase();
+    fs.writeFileSync(filePath, JSON.stringify(payload));
+    console.log(`Account activated: ${email} (sync: ${syncCode})`);
+    res.json({ success: true });
+  } catch (err) {
+    console.error('Activate error:', err);
+    res.status(500).json({ error: 'Activation failed' });
+  }
+});
+
+// POS Purchase - Check purchase status
+app.get('/api/pos/purchase-status/:email', (req, res) => {
+  try {
+    const email = req.params.email.toLowerCase();
+    const map = loadSyncMap();
+    const syncCode = map[email];
+    if (!syncCode) return res.json({ purchased: false });
+    const filePath = path.join(POS_DATA_DIR, `${syncCode}.json`);
+    let payload = {};
+    try { payload = JSON.parse(fs.readFileSync(filePath, 'utf8')); } catch {}
+    res.json({ purchased: !!(payload.settings && payload.settings.purchased), purchasedAt: payload.settings?.purchasedAt || null });
+  } catch (err) {
+    res.status(500).json({ error: 'Check failed' });
+  }
+});
+
 // POS Purchase - Square Checkout
 app.post('/api/pos/checkout', async (req, res) => {
   try {
