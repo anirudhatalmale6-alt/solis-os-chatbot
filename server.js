@@ -478,8 +478,11 @@ app.post('/api/pos/sync', (req, res) => {
     else if (existing.customers) payload.customers = existing.customers;
     if (sales !== undefined) payload.sales = mergeRecords(existing.sales, sales);
     else if (existing.sales) payload.sales = existing.sales;
-    if (settings !== undefined) payload.settings = settings;
-    else if (existing.settings) payload.settings = existing.settings;
+    if (settings !== undefined) {
+      const merged = existing.settings ? { ...existing.settings } : {};
+      for (const [k, v] of Object.entries(settings)) { merged[k] = v; }
+      payload.settings = merged;
+    } else if (existing.settings) payload.settings = existing.settings;
     fs.writeFileSync(filePath, JSON.stringify(payload));
     if (email) {
       const map = loadSyncMap();
