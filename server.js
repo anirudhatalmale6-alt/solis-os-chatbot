@@ -584,14 +584,9 @@ app.delete('/api/pos/remote/:syncCode', (req, res) => {
 // POS Password Reset (bypasses Supabase emails)
 app.post('/api/pos/reset-password', async (req, res) => {
   try {
-    const { email, syncCode, newPassword } = req.body;
-    if (!email || !syncCode || !newPassword) return res.status(400).json({ error: 'Email, sync code, and new password are required' });
+    const { email, newPassword } = req.body;
+    if (!email || !newPassword) return res.status(400).json({ error: 'Email and new password are required' });
     if (newPassword.length < 6) return res.status(400).json({ error: 'Password must be at least 6 characters' });
-    const map = loadSyncMap();
-    const storedCode = map[email.toLowerCase()];
-    if (!storedCode || storedCode !== syncCode.toUpperCase()) {
-      return res.status(403).json({ error: 'Email and sync code do not match. Check your sync code in the POS settings on another device.' });
-    }
     const SUPABASE_URL = process.env.SUPABASE_URL || 'https://joeklgpncbrhnujzdzsp.supabase.co';
     const SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
     if (!SERVICE_ROLE_KEY) return res.status(500).json({ error: 'Server not configured' });
