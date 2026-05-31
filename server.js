@@ -609,42 +609,34 @@ app.post('/api/pos/send-reset-code', async (req, res) => {
     RESET_CODES.set(email.toLowerCase(), { code: otp, expires: Date.now() + 3600000 });
     setTimeout(() => RESET_CODES.delete(email.toLowerCase()), 3600000);
     const resetLink = `https://solis-os.com/app/?reset=${encodeURIComponent(email.toLowerCase())}`;
-    const htmlEmail = `
-<!DOCTYPE html>
-<html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>
-<body style="margin:0;padding:0;background:#f7f8fc;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif">
-<table width="100%" cellpadding="0" cellspacing="0" style="background:#f7f8fc;padding:40px 20px">
-<tr><td align="center">
-<table width="480" cellpadding="0" cellspacing="0" style="background:#ffffff;border-radius:16px;overflow:hidden;box-shadow:0 4px 24px rgba(0,0,0,0.08)">
-<tr><td style="background:linear-gradient(135deg,#1a1d2e 0%,#2d3148 100%);padding:32px 40px;text-align:center">
-<h1 style="margin:0;font-size:28px;font-weight:800;color:#ffffff;letter-spacing:-0.5px">Solis OS <span style="color:#f59e0b">POS</span></h1>
-</td></tr>
-<tr><td style="padding:40px">
-<h2 style="margin:0 0 8px;font-size:22px;font-weight:700;color:#1a1d2e">Password Reset</h2>
-<p style="margin:0 0 24px;font-size:15px;color:#6b7280;line-height:1.6">You requested to reset your password. Use the verification code below in the app:</p>
-<div style="background:#f7f8fc;border:2px solid #e8e9ef;border-radius:12px;padding:24px;text-align:center;margin:0 0 24px">
-<p style="margin:0 0 8px;font-size:12px;font-weight:600;color:#9ca3af;text-transform:uppercase;letter-spacing:1px">Verification Code</p>
-<p style="margin:0;font-size:36px;font-weight:800;color:#1a1d2e;letter-spacing:8px;font-family:monospace">${otp}</p>
+    const plainText = `Solis OS POS - Password Reset\n\nYou requested to reset your password.\n\nYour verification code is: ${otp}\n\nOpen the app and enter this code: ${resetLink}\n\nThis code expires in 60 minutes.\n\nIf you didn't request this, you can safely ignore this email.\n\nSolis OS Support`;
+    const htmlEmail = `<!DOCTYPE html>
+<html><head><meta charset="utf-8"></head>
+<body style="margin:0;padding:20px;font-family:Arial,sans-serif;background:#ffffff">
+<div style="max-width:480px;margin:0 auto">
+<h2 style="color:#1a1d2e;margin:0 0 4px">Solis OS POS</h2>
+<p style="color:#6b7280;font-size:14px;margin:0 0 20px">Password Reset Request</p>
+<p style="color:#333;font-size:15px;line-height:1.6;margin:0 0 20px">You requested to reset your password. Use the verification code below:</p>
+<div style="background:#f5f5f5;border:1px solid #ddd;border-radius:8px;padding:20px;text-align:center;margin:0 0 20px">
+<p style="margin:0 0 6px;font-size:12px;color:#888;text-transform:uppercase">Verification Code</p>
+<p style="margin:0;font-size:32px;font-weight:bold;color:#1a1d2e;letter-spacing:6px;font-family:monospace">${otp}</p>
 </div>
-<a href="${resetLink}" style="display:block;background:linear-gradient(135deg,#f59e0b,#d97706);color:#ffffff;text-decoration:none;padding:16px;border-radius:12px;text-align:center;font-size:16px;font-weight:700;margin:0 0 24px">Open Solis OS POS</a>
-<p style="margin:0 0 4px;font-size:13px;color:#9ca3af;line-height:1.5">This code expires in 60 minutes.</p>
-<p style="margin:0;font-size:13px;color:#9ca3af;line-height:1.5">If you didn't request this, you can safely ignore this email.</p>
-</td></tr>
-<tr><td style="background:#f7f8fc;padding:24px 40px;text-align:center;border-top:1px solid #e8e9ef">
-<p style="margin:0;font-size:12px;color:#9ca3af">&copy; 2026 Solis OS. All rights reserved.</p>
-</td></tr>
-</table>
-</td></tr>
-</table>
+<p style="margin:0 0 20px"><a href="${resetLink}" style="display:inline-block;background:#d97706;color:#fff;text-decoration:none;padding:12px 24px;border-radius:6px;font-size:15px;font-weight:bold">Open Solis OS POS</a></p>
+<p style="color:#999;font-size:13px;margin:0 0 4px">This code expires in 60 minutes.</p>
+<p style="color:#999;font-size:13px;margin:0">If you didn't request this, ignore this email.</p>
+<hr style="border:none;border-top:1px solid #eee;margin:24px 0">
+<p style="color:#aaa;font-size:11px;margin:0">Solis OS Support - solis-os.com</p>
+</div>
 </body></html>`;
     const smtpUser = process.env.SMTP_USER || 'Solis.os.support@gmail.com';
     const smtpPass = process.env.SMTP_PASS || 'xdjjbbzvxsxpjvin';
     const transporter = nodemailer.createTransport({ host: 'smtp.gmail.com', port: 587, secure: false, auth: { user: smtpUser, pass: smtpPass } });
     try {
       await transporter.sendMail({
-        from: `"Solis OS" <${smtpUser}>`,
+        from: `"Solis OS Support" <${smtpUser}>`,
         to: email.toLowerCase(),
-        subject: 'Solis OS POS — Password Reset Code',
+        subject: 'Your Solis OS password reset code',
+        text: plainText,
         html: htmlEmail,
       });
     } catch (mailErr) {
