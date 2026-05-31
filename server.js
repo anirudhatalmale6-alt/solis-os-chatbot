@@ -630,7 +630,7 @@ app.post('/api/pos/send-reset-code', async (req, res) => {
 </body></html>`;
     const smtpUser = process.env.SMTP_USER || 'Solis.os.support@gmail.com';
     const smtpPass = process.env.SMTP_PASS || 'xdjjbbzvxsxpjvin';
-    const transporter = nodemailer.createTransport({ host: 'smtp.gmail.com', port: 587, secure: false, auth: { user: smtpUser, pass: smtpPass } });
+    const transporter = nodemailer.createTransport({ host: 'smtp.gmail.com', port: 587, secure: false, connectionTimeout: 5000, greetingTimeout: 5000, socketTimeout: 5000, auth: { user: smtpUser, pass: smtpPass } });
     try {
       await transporter.sendMail({
         from: `"Solis OS Support" <${smtpUser}>`,
@@ -644,6 +644,12 @@ app.post('/api/pos/send-reset-code', async (req, res) => {
       return;
     } catch (mailErr) {
       console.error('SMTP error:', mailErr.message);
+      const SB_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImpvZWtsZ3BuY2JyaG51anpkenNwIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzgzNTA1ODksImV4cCI6MjA5MzkyNjU4OX0.p4hS6hpKaweZRDIZbeuWb6-c0NL7irtTJ_HXOZmdTmY';
+      await fetch(`${SUPABASE_URL}/auth/v1/otp`, {
+        method: 'POST',
+        headers: { 'apikey': SB_ANON_KEY, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: email.toLowerCase(), create_user: false }),
+      });
       res.json({ success: true, method: 'fallback', smtpError: mailErr.message });
     }
   } catch (err) {
