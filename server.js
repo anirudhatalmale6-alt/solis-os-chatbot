@@ -696,12 +696,17 @@ app.post('/api/pos/send-reset-code', async (req, res) => {
     const SUPABASE_URL = process.env.SUPABASE_URL || 'https://joeklgpncbrhnujzdzsp.supabase.co';
     const SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImpvZWtsZ3BuY2JyaG51anpkenNwIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3ODM1MDU4OSwiZXhwIjoyMDkzOTI2NTg5fQ.qSjr5JCxcw0wzl3_IypMMxWQhFl5FJ4IskiH04YPmiI';
     const SB_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImpvZWtsZ3BuY2JyaG51anpkenNwIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzgzNTA1ODksImV4cCI6MjA5MzkyNjU4OX0.p4hS6hpKaweZRDIZbeuWb6-c0NL7irtTJ_HXOZmdTmY';
-    const usersResp = await fetch(`${SUPABASE_URL}/auth/v1/admin/users?page=1&per_page=200`, {
+    const usersResp = await fetch(`${SUPABASE_URL}/auth/v1/admin/users?page=1&per_page=500`, {
       headers: { 'Authorization': `Bearer ${SERVICE_ROLE_KEY}`, 'apikey': SERVICE_ROLE_KEY },
     });
+    if (!usersResp.ok) {
+      console.error('Failed to fetch users:', usersResp.status);
+      return res.status(500).json({ error: 'Unable to verify account. Please try again.' });
+    }
     const usersData = await usersResp.json();
     const user = (usersData.users || []).find(u => u.email && u.email.toLowerCase() === email.toLowerCase());
-    if (!user) return res.status(404).json({ error: 'No account found with this email' });
+    if (!user) return res.status(404).json({ error: 'No account found with this email. Please check the email or create a new account.' });
+    if (!user.email_confirmed_at) return res.status(404).json({ error: 'This account was never fully activated. Please sign up again.' });
     const recoverResp = await fetch(`${SUPABASE_URL}/auth/v1/recover`, {
       method: 'POST',
       headers: { 'apikey': SB_ANON_KEY, 'Content-Type': 'application/json' },
@@ -753,12 +758,13 @@ app.post('/api/pos/reset-password', async (req, res) => {
         return res.json({ success: true });
       }
     }
-    const usersResp = await fetch(`${SUPABASE_URL}/auth/v1/admin/users?page=1&per_page=200`, {
+    const usersResp = await fetch(`${SUPABASE_URL}/auth/v1/admin/users?page=1&per_page=500`, {
       headers: { 'Authorization': `Bearer ${SERVICE_ROLE_KEY}`, 'apikey': SERVICE_ROLE_KEY },
     });
+    if (!usersResp.ok) return res.status(500).json({ error: 'Unable to verify account. Please try again.' });
     const usersData = await usersResp.json();
     const user = (usersData.users || []).find(u => u.email && u.email.toLowerCase() === email.toLowerCase());
-    if (!user) return res.status(404).json({ error: 'No account found with this email' });
+    if (!user || !user.email_confirmed_at) return res.status(404).json({ error: 'No verified account found with this email.' });
     const adminUpdateResp = await fetch(`${SUPABASE_URL}/auth/v1/admin/users/${user.id}`, {
       method: 'PUT',
       headers: { 'Authorization': `Bearer ${SERVICE_ROLE_KEY}`, 'apikey': SERVICE_ROLE_KEY, 'Content-Type': 'application/json' },
