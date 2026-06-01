@@ -170,7 +170,7 @@ app.get('/api/admin/signups', async (req, res) => {
     if (!SERVICE_ROLE_KEY) return res.status(500).json({ error: 'Server not configured' });
 
     const [usersResp, bizResp] = await Promise.all([
-      fetch(`${SUPABASE_URL}/auth/v1/admin/users?page=1&per_page=100`, {
+      fetch(`${SUPABASE_URL}/auth/v1/admin/users?page=1&per_page=500`, {
         headers: { 'Authorization': `Bearer ${SERVICE_ROLE_KEY}`, 'apikey': SERVICE_ROLE_KEY },
       }),
       fetch(`${SUPABASE_URL}/rest/v1/businesses?select=*&order=created_at.desc`, {
@@ -181,14 +181,21 @@ app.get('/api/admin/signups', async (req, res) => {
     const usersData = await usersResp.json();
     const businesses = await bizResp.json();
 
-    const users = (usersData.users || []).map(u => ({
-      id: u.id,
-      email: u.email,
-      full_name: u.user_metadata?.full_name || '',
-      created_at: u.created_at,
-      last_sign_in: u.last_sign_in_at,
-      business: Array.isArray(businesses) ? businesses.find(b => b.owner_id === u.id) || null : null,
-    }));
+    const users = (usersData.users || []).map(u => {
+      const dbBiz = Array.isArray(businesses) ? businesses.find(b => b.owner_id === u.id) : null;
+      const metaBizName = u.user_metadata?.business_name;
+      const isPOS = !dbBiz && !!metaBizName;
+      return {
+        id: u.id,
+        email: u.email,
+        full_name: u.user_metadata?.full_name || '',
+        created_at: u.created_at,
+        last_sign_in: u.last_sign_in_at,
+        email_confirmed: !!u.email_confirmed_at,
+        source: isPOS ? 'pos' : dbBiz ? 'dashboard' : 'unknown',
+        business: dbBiz || (metaBizName ? { name: metaBizName, industry: 'POS' } : null),
+      };
+    });
 
     users.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
     res.json({ users, total: usersData.total || users.length });
