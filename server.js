@@ -822,11 +822,15 @@ app.post('/api/pos/activate', (req, res) => {
     let payload = {};
     try { payload = JSON.parse(fs.readFileSync(filePath, 'utf8')); } catch {}
     if (!payload.settings) payload.settings = {};
+    const now = new Date();
+    const end = new Date(now);
+    end.setFullYear(end.getFullYear() + 1);
     payload.settings.purchased = true;
-    payload.settings.purchasedAt = new Date().toISOString();
+    payload.settings.purchasedAt = now.toISOString();
+    payload.settings.subscriptionEnd = end.toISOString();
     payload.settings.purchasedEmail = email.toLowerCase();
     fs.writeFileSync(filePath, JSON.stringify(payload));
-    console.log(`Account activated: ${email} (sync: ${syncCode})`);
+    console.log(`POS activated: ${email} (sync: ${syncCode}, expires: ${end.toISOString()})`);
     res.json({ success: true });
   } catch (err) {
     console.error('Activate error:', err);
@@ -879,6 +883,382 @@ app.post('/api/pos/checkout', async (req, res) => {
     res.json({ checkout_url: link.long_url || link.url || '', order_id: link.order_id || '' });
   } catch (err) { console.error('Checkout error:', err); res.status(500).json({ error: 'Internal error' }); }
 });
+
+// ── Dashboard Subscription & Square Billing ─────────────────────
+
+const SUPABASE_URL = process.env.SUPABASE_URL || 'https://joeklgpncbrhnujzdzsp.supabase.co';
+const SUPA_SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImpvZWtsZ3BuY2JyaG51anpkenNwIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3ODM1MDU4OSwiZXhwIjoyMDkzOTI2NTg5fQ.qSjr5JCxcw0wzl3_IypMMxWQhFl5FJ4IskiH04YPmiI';
+const DASHBOARD_PRICE = 3900; // $39 AUD in cents
+
+async function findSupabaseUser(email) {
+  const resp = await fetch(`${SUPABASE_URL}/auth/v1/admin/users?page=1&per_page=500`, {
+    headers: { 'Authorization': `Bearer ${SUPA_SERVICE_KEY}`, 'apikey': SUPA_SERVICE_KEY }
+  });
+  if (!resp.ok) return null;
+  const data = await resp.json();
+  return (data.users || []).find(u => u.email?.toLowerCase() === email.toLowerCase());
+}
+
+async function updateUserMeta(userId, metadata) {
+  const resp = await fetch(`${SUPABASE_URL}/auth/v1/admin/users/${userId}`, {
+    method: 'PUT',
+    headers: { 'Authorization': `Bearer ${SUPA_SERVICE_KEY}`, 'apikey': SUPA_SERVICE_KEY, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ user_metadata: metadata })
+  });
+  return resp.ok;
+}
+
+// Square helper
+async function squareRequest(endpoint, body) {
+  const token = process.env.SQUARE_ACCESS_TOKEN;
+  const resp = await fetch(`https://connect.squareup.com/v2${endpoint}`, {
+    method: 'POST',
+    headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json', 'Square-Version': '2024-12-18' },
+    body: JSON.stringify(body),
+  });
+  return resp.json();
+}
+
+// Subscribe - Create customer, save card, charge $39/month
+app.post('/api/subscribe', async (req, res) => {
+  try {
+    const { source_id, business_id, user_id, email, name } = req.body;
+    if (!source_id || !email) return res.status(400).json({ error: 'Missing required fields' });
+    const SQUARE_TOKEN = process.env.SQUARE_ACCESS_TOKEN;
+    const SQUARE_LOCATION = process.env.SQUARE_LOCATION_ID;
+    if (!SQUARE_TOKEN || !SQUARE_LOCATION) return res.status(503).json({ error: 'Payment system not configured' });
+
+    // 1. Create Square customer
+    const custData = await squareRequest('/customers', {
+      idempotency_key: `cust_${Date.now()}_${Math.random().toString(36).slice(2,8)}`,
+      email_address: email,
+      given_name: name || email.split('@')[0],
+      reference_id: user_id || business_id,
+    });
+    if (custData.errors) { console.error('Square customer error:', custData.errors); return res.status(500).json({ error: 'Failed to create customer' }); }
+    const customerId = custData.customer.id;
+
+    // 2. Save card on file
+    const cardData = await squareRequest('/cards', {
+      idempotency_key: `card_${Date.now()}_${Math.random().toString(36).slice(2,8)}`,
+      source_id,
+      card: { customer_id: customerId },
+    });
+    if (cardData.errors) { console.error('Square card error:', cardData.errors); return res.status(500).json({ error: 'Failed to save card' }); }
+    const cardId = cardData.card.id;
+
+    // 3. Charge first month
+    const payData = await squareRequest('/payments', {
+      idempotency_key: `pay_${Date.now()}_${Math.random().toString(36).slice(2,8)}`,
+      source_id: cardId,
+      amount_money: { amount: DASHBOARD_PRICE, currency: 'AUD' },
+      customer_id: customerId,
+      location_id: SQUARE_LOCATION,
+      note: 'Solis OS Dashboard — Monthly Subscription',
+      autocomplete: true,
+    });
+    if (payData.errors) { console.error('Square payment error:', payData.errors); return res.status(500).json({ error: 'Payment failed: ' + (payData.errors[0]?.detail || 'Unknown') }); }
+
+    // 4. Store subscription data
+    const now = new Date();
+    const periodEnd = new Date(now);
+    periodEnd.setMonth(periodEnd.getMonth() + 1);
+    const user = await findSupabaseUser(email);
+    if (user) {
+      await updateUserMeta(user.id, {
+        ...user.user_metadata,
+        dashboard_subscription: {
+          status: 'active',
+          start: now.toISOString(),
+          current_period_end: periodEnd.toISOString(),
+          square_customer_id: customerId,
+          square_card_id: cardId,
+          cancelled: false,
+        }
+      });
+    }
+
+    console.log(`Dashboard subscription created: ${email} (customer: ${customerId})`);
+    res.json({
+      success: true,
+      customer_id: customerId,
+      subscription_id: `sub_${customerId}`,
+      current_period_end: periodEnd.toISOString(),
+    });
+  } catch (err) { console.error('Subscribe error:', err); res.status(500).json({ error: 'Internal error' }); }
+});
+
+// Cancel subscription via Square (from BillingPage)
+app.post('/api/cancel', async (req, res) => {
+  try {
+    const { business_id } = req.body;
+    // Find user by business
+    const bizResp = await fetch(`${SUPABASE_URL}/rest/v1/businesses?id=eq.${business_id}&select=owner_id`, {
+      headers: { 'Authorization': `Bearer ${SUPA_SERVICE_KEY}`, 'apikey': SUPA_SERVICE_KEY }
+    });
+    if (!bizResp.ok) return res.status(500).json({ error: 'Business lookup failed' });
+    const businesses = await bizResp.json();
+    if (!businesses.length) return res.status(404).json({ error: 'Business not found' });
+    const ownerId = businesses[0].owner_id;
+
+    const userResp = await fetch(`${SUPABASE_URL}/auth/v1/admin/users/${ownerId}`, {
+      headers: { 'Authorization': `Bearer ${SUPA_SERVICE_KEY}`, 'apikey': SUPA_SERVICE_KEY }
+    });
+    if (!userResp.ok) return res.status(404).json({ error: 'User not found' });
+    const user = await userResp.json();
+    const sub = user.user_metadata?.dashboard_subscription;
+    if (!sub) return res.status(400).json({ error: 'No subscription found' });
+
+    await updateUserMeta(user.id, {
+      ...user.user_metadata,
+      dashboard_subscription: { ...sub, status: 'cancelled', cancelled: true, cancelled_at: new Date().toISOString() }
+    });
+    console.log(`Dashboard cancelled via billing: ${user.email}`);
+    res.json({ success: true, access_until: sub.current_period_end });
+  } catch (err) { console.error('Cancel error:', err); res.status(500).json({ error: 'Internal error' }); }
+});
+
+// Get subscription status (from BillingPage)
+app.get('/api/subscription/:bizId', async (req, res) => {
+  try {
+    const bizResp = await fetch(`${SUPABASE_URL}/rest/v1/businesses?id=eq.${req.params.bizId}&select=owner_id`, {
+      headers: { 'Authorization': `Bearer ${SUPA_SERVICE_KEY}`, 'apikey': SUPA_SERVICE_KEY }
+    });
+    if (!bizResp.ok) return res.json({ subscription: null });
+    const businesses = await bizResp.json();
+    if (!businesses.length) return res.json({ subscription: null });
+
+    const userResp = await fetch(`${SUPABASE_URL}/auth/v1/admin/users/${businesses[0].owner_id}`, {
+      headers: { 'Authorization': `Bearer ${SUPA_SERVICE_KEY}`, 'apikey': SUPA_SERVICE_KEY }
+    });
+    if (!userResp.ok) return res.json({ subscription: null });
+    const user = await userResp.json();
+    const sub = user.user_metadata?.dashboard_subscription;
+    if (!sub) return res.json({ subscription: null });
+
+    const now = new Date();
+    const end = new Date(sub.current_period_end);
+    res.json({ subscription: { ...sub, active: sub.status === 'active' && end > now } });
+  } catch (err) { res.json({ subscription: null }); }
+});
+
+// Dashboard Checkout - Square Payment Link for $39/month (fallback for non-logged-in users)
+app.post('/api/dashboard/checkout', async (req, res) => {
+  try {
+    const { email } = req.body;
+    if (!email) return res.status(400).json({ error: 'Email is required' });
+    const SQUARE_TOKEN = process.env.SQUARE_ACCESS_TOKEN;
+    const SQUARE_LOCATION = process.env.SQUARE_LOCATION_ID;
+    if (!SQUARE_TOKEN || !SQUARE_LOCATION) return res.status(503).json({ error: 'Payment system not configured' });
+    const idempotencyKey = `dash_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
+    const body = {
+      idempotency_key: idempotencyKey,
+      order: {
+        location_id: SQUARE_LOCATION,
+        line_items: [{ name: 'Solis OS Dashboard — Monthly Subscription', quantity: '1', base_price_money: { amount: 3900, currency: 'AUD' } }],
+      },
+      checkout_options: { redirect_url: `https://app.solis-os.com/?payment=success&product=dashboard&email=${encodeURIComponent(email)}` },
+      pre_populated_data: { buyer_email: email },
+    };
+    const resp = await fetch('https://connect.squareup.com/v2/online-checkout/payment-links', {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${SQUARE_TOKEN}`, 'Content-Type': 'application/json', 'Square-Version': '2024-12-18' },
+      body: JSON.stringify(body),
+    });
+    const data = await resp.json();
+    if (!resp.ok) { console.error('Dashboard checkout error:', JSON.stringify(data)); return res.status(500).json({ error: 'Payment link creation failed', details: data.errors }); }
+    const link = data.payment_link || {};
+    res.json({ checkout_url: link.long_url || link.url || '', order_id: link.order_id || '' });
+  } catch (err) { console.error('Dashboard checkout error:', err); res.status(500).json({ error: 'Internal error' }); }
+});
+
+// Dashboard Activate - After successful payment
+app.post('/api/dashboard/activate', async (req, res) => {
+  try {
+    const { email } = req.body;
+    if (!email) return res.status(400).json({ error: 'Email is required' });
+    const user = await findSupabaseUser(email);
+    if (!user) return res.status(404).json({ error: 'User not found' });
+    const now = new Date();
+    const end = new Date(now);
+    end.setMonth(end.getMonth() + 1);
+    const ok = await updateUserMeta(user.id, {
+      ...user.user_metadata,
+      dashboard_subscription: {
+        status: 'active',
+        start: now.toISOString(),
+        current_period_end: end.toISOString(),
+        cancelled: false
+      }
+    });
+    if (!ok) return res.status(500).json({ error: 'Activation failed' });
+    console.log(`Dashboard activated: ${email} (expires: ${end.toISOString()})`);
+    res.json({ success: true, subscription: { status: 'active', current_period_end: end.toISOString() } });
+  } catch (err) { console.error('Dashboard activate error:', err); res.status(500).json({ error: 'Internal error' }); }
+});
+
+// Dashboard Subscription Status
+app.get('/api/dashboard/subscription-status/:email', async (req, res) => {
+  try {
+    const user = await findSupabaseUser(req.params.email);
+    if (!user) return res.status(404).json({ error: 'User not found' });
+    const sub = user.user_metadata?.dashboard_subscription;
+    if (!sub) return res.json({ subscribed: false });
+    const now = new Date();
+    const end = new Date(sub.current_period_end);
+    const active = sub.status === 'active' && end > now;
+    res.json({ subscribed: active, subscription: sub });
+  } catch (err) { res.status(500).json({ error: 'Check failed' }); }
+});
+
+// Dashboard Cancel Subscription
+app.post('/api/dashboard/cancel-subscription', async (req, res) => {
+  try {
+    const { email } = req.body;
+    if (!email) return res.status(400).json({ error: 'Email is required' });
+    const user = await findSupabaseUser(email);
+    if (!user) return res.status(404).json({ error: 'User not found' });
+    const sub = user.user_metadata?.dashboard_subscription;
+    if (!sub) return res.status(400).json({ error: 'No active subscription' });
+    const ok = await updateUserMeta(user.id, {
+      ...user.user_metadata,
+      dashboard_subscription: {
+        ...sub,
+        status: 'cancelled',
+        cancelled: true,
+        cancelled_at: new Date().toISOString()
+      }
+    });
+    if (!ok) return res.status(500).json({ error: 'Cancellation failed' });
+    console.log(`Dashboard cancelled: ${email} (access until: ${sub.current_period_end})`);
+    res.json({ success: true, access_until: sub.current_period_end });
+  } catch (err) { console.error('Cancel error:', err); res.status(500).json({ error: 'Internal error' }); }
+});
+
+// ── Subscription Renewal Reminders ──────────────────────────────
+
+const emailTransporter = nodemailer.createTransport({
+  host: 'smtp.gmail.com',
+  port: 587,
+  secure: false,
+  auth: { user: 'Solis.os.support@gmail.com', pass: process.env.GMAIL_APP_PASSWORD || 'xdjjbbzvxsxpjvin' }
+});
+
+async function sendRenewalEmail(to, product, daysLeft, renewalDate) {
+  const subject = `Your Solis OS ${product} subscription renews in ${daysLeft} days`;
+  const html = `
+    <div style="font-family:sans-serif;max-width:600px;margin:0 auto;padding:20px">
+      <img src="https://solis-os.com/assets/logo.png" alt="Solis OS" style="height:40px;margin-bottom:20px">
+      <h2 style="color:#1A1D2E">Subscription Renewal Reminder</h2>
+      <p style="color:#6B7280;line-height:1.7">Hi there,</p>
+      <p style="color:#6B7280;line-height:1.7">Your <strong>Solis OS ${product}</strong> subscription will renew on <strong>${new Date(renewalDate).toLocaleDateString('en-AU', { year: 'numeric', month: 'long', day: 'numeric' })}</strong> (${daysLeft} days from now).</p>
+      <p style="color:#6B7280;line-height:1.7">${product === 'POS' ? 'The annual renewal fee is $239 AUD.' : 'The monthly fee is $39 AUD.'}</p>
+      <p style="color:#6B7280;line-height:1.7">If you wish to continue using the service, no action is needed. If you would like to cancel, please ${product === 'Dashboard' ? 'go to Settings in your dashboard' : 'contact us at Solis.os.support@gmail.com or WhatsApp +44 7700 168964'}.</p>
+      <p style="color:#6B7280;line-height:1.7">Thank you for using Solis OS!</p>
+      <p style="color:#9CA3AF;font-size:13px;margin-top:30px;border-top:1px solid #E8E9EF;padding-top:15px">Solis OS &middot; <a href="https://solis-os.com" style="color:#d97706">solis-os.com</a></p>
+    </div>`;
+  try {
+    await emailTransporter.sendMail({ from: '"Solis OS" <Solis.os.support@gmail.com>', to, subject, html });
+    console.log(`Renewal reminder sent: ${to} (${product}, ${daysLeft} days)`);
+  } catch (err) { console.error(`Renewal email failed for ${to}:`, err.message); }
+}
+
+const REMINDER_LOG = path.join(__dirname, 'reminder_log.json');
+function loadReminderLog() { try { return JSON.parse(fs.readFileSync(REMINDER_LOG, 'utf8')); } catch { return {}; } }
+function saveReminderLog(log) { fs.writeFileSync(REMINDER_LOG, JSON.stringify(log)); }
+
+async function checkRenewals() {
+  const log = loadReminderLog();
+  const now = new Date();
+  const today = now.toISOString().slice(0, 10);
+
+  // Check POS subscriptions
+  try {
+    const map = loadSyncMap();
+    for (const [email, syncCode] of Object.entries(map)) {
+      const filePath = path.join(POS_DATA_DIR, `${syncCode}.json`);
+      let payload = {};
+      try { payload = JSON.parse(fs.readFileSync(filePath, 'utf8')); } catch { continue; }
+      const end = payload.settings?.subscriptionEnd;
+      if (!end || !payload.settings?.purchased) continue;
+      const endDate = new Date(end);
+      const daysLeft = Math.ceil((endDate - now) / (1000 * 60 * 60 * 24));
+      if (daysLeft >= 13 && daysLeft <= 15) {
+        const key = `pos_${email}_${today}`;
+        if (!log[key]) {
+          await sendRenewalEmail(email, 'POS', daysLeft, end);
+          log[key] = true;
+          saveReminderLog(log);
+        }
+      }
+    }
+  } catch (err) { console.error('POS renewal check error:', err.message); }
+
+  // Check Dashboard subscriptions — reminders + auto-renewal
+  try {
+    const resp = await fetch(`${SUPABASE_URL}/auth/v1/admin/users?page=1&per_page=500`, {
+      headers: { 'Authorization': `Bearer ${SUPA_SERVICE_KEY}`, 'apikey': SUPA_SERVICE_KEY }
+    });
+    if (resp.ok) {
+      const data = await resp.json();
+      for (const user of (data.users || [])) {
+        const sub = user.user_metadata?.dashboard_subscription;
+        if (!sub || sub.cancelled) continue;
+        const endDate = new Date(sub.current_period_end);
+        const daysLeft = Math.ceil((endDate - now) / (1000 * 60 * 60 * 24));
+
+        // Send reminder 5-7 days before renewal
+        if (sub.status === 'active' && daysLeft >= 5 && daysLeft <= 7) {
+          const key = `dash_${user.email}_${today}`;
+          if (!log[key]) {
+            await sendRenewalEmail(user.email, 'Dashboard', daysLeft, sub.current_period_end);
+            log[key] = true;
+            saveReminderLog(log);
+          }
+        }
+
+        // Auto-renew if period ended and card on file
+        if (sub.status === 'active' && endDate <= now && sub.square_card_id && sub.square_customer_id) {
+          const renewKey = `dash_renew_${user.email}_${today}`;
+          if (!log[renewKey]) {
+            try {
+              const SQUARE_LOCATION = process.env.SQUARE_LOCATION_ID;
+              const payData = await squareRequest('/payments', {
+                idempotency_key: `renew_${Date.now()}_${Math.random().toString(36).slice(2,8)}`,
+                source_id: sub.square_card_id,
+                amount_money: { amount: DASHBOARD_PRICE, currency: 'AUD' },
+                customer_id: sub.square_customer_id,
+                location_id: SQUARE_LOCATION,
+                note: 'Solis OS Dashboard — Monthly Renewal',
+                autocomplete: true,
+              });
+              if (!payData.errors) {
+                const newEnd = new Date(now);
+                newEnd.setMonth(newEnd.getMonth() + 1);
+                await updateUserMeta(user.id, {
+                  ...user.user_metadata,
+                  dashboard_subscription: { ...sub, current_period_end: newEnd.toISOString() }
+                });
+                console.log(`Dashboard auto-renewed: ${user.email} (until ${newEnd.toISOString()})`);
+              } else {
+                console.error(`Dashboard renewal payment failed for ${user.email}:`, payData.errors[0]?.detail);
+                await updateUserMeta(user.id, {
+                  ...user.user_metadata,
+                  dashboard_subscription: { ...sub, status: 'past_due' }
+                });
+              }
+              log[renewKey] = true;
+              saveReminderLog(log);
+            } catch (err) { console.error(`Dashboard renewal error for ${user.email}:`, err.message); }
+          }
+        }
+      }
+    }
+  } catch (err) { console.error('Dashboard renewal check error:', err.message); }
+}
+
+setInterval(checkRenewals, 6 * 60 * 60 * 1000);
+setTimeout(checkRenewals, 30000);
 
 if (require.main === module) {
   const PORT = process.env.PORT || 3000;
