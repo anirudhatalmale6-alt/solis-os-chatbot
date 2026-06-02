@@ -205,6 +205,28 @@ app.get('/api/admin/signups', async (req, res) => {
   }
 });
 
+app.delete('/api/admin/signups/:userId', async (req, res) => {
+  try {
+    const { userId } = req.params;
+    if (!userId) return res.status(400).json({ error: 'User ID required' });
+    const SUPABASE_URL = process.env.SUPABASE_URL || 'https://joeklgpncbrhnujzdzsp.supabase.co';
+    const SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImpvZWtsZ3BuY2JyaG51anpkenNwIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3ODM1MDU4OSwiZXhwIjoyMDkzOTI2NTg5fQ.qSjr5JCxcw0wzl3_IypMMxWQhFl5FJ4IskiH04YPmiI';
+    const delResp = await fetch(`${SUPABASE_URL}/auth/v1/admin/users/${userId}`, {
+      method: 'DELETE',
+      headers: { 'Authorization': `Bearer ${SERVICE_ROLE_KEY}`, 'apikey': SERVICE_ROLE_KEY },
+    });
+    if (!delResp.ok) {
+      const d = await delResp.json().catch(() => ({}));
+      return res.status(delResp.status).json({ error: d.msg || d.message || 'Failed to delete user' });
+    }
+    console.log(`Admin deleted user: ${userId}`);
+    res.json({ success: true });
+  } catch (err) {
+    console.error('Delete user error:', err);
+    res.status(500).json({ error: 'Internal error' });
+  }
+});
+
 app.post('/api/public-booking', async (req, res) => {
   try {
     const { business_id, service_id, service_name, customer_name, customer_phone, customer_email, date, time, duration, notes } = req.body;
