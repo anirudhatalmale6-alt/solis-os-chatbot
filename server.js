@@ -1135,6 +1135,26 @@ app.post('/api/dashboard/cancel-subscription', async (req, res) => {
   } catch (err) { console.error('Cancel error:', err); res.status(500).json({ error: 'Internal error' }); }
 });
 
+// POS Cancel Subscription
+app.post('/api/pos/cancel-subscription', (req, res) => {
+  try {
+    const { email } = req.body;
+    if (!email) return res.status(400).json({ error: 'Email is required' });
+    const map = loadSyncMap();
+    const syncCode = map[email.toLowerCase()];
+    if (!syncCode) return res.status(404).json({ error: 'No account found with this email.' });
+    const filePath = path.join(POS_DATA_DIR, `${syncCode}.json`);
+    let payload = {};
+    try { payload = JSON.parse(fs.readFileSync(filePath, 'utf8')); } catch {}
+    if (!payload.settings || !payload.settings.purchased) return res.status(400).json({ error: 'No active subscription found for this email.' });
+    payload.settings.cancelled = true;
+    payload.settings.cancelledAt = new Date().toISOString();
+    fs.writeFileSync(filePath, JSON.stringify(payload));
+    console.log(`POS cancelled: ${email} (access until: ${payload.settings.subscriptionEnd})`);
+    res.json({ success: true, access_until: payload.settings.subscriptionEnd || null });
+  } catch (err) { console.error('POS cancel error:', err); res.status(500).json({ error: 'Internal error' }); }
+});
+
 // ── Subscription Renewal Reminders ──────────────────────────────
 
 const emailTransporter = nodemailer.createTransport({
