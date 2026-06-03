@@ -300,6 +300,19 @@ function matchTopicKey(input, lang) {
       ja: ['さようなら', 'またね', 'おやすみ', 'バイバイ', 'では'],
       ko: ['안녕히', '잘가', '다음에', '바이', '좋은 밤']
     },
+    cancel: {
+      en: ['cancel', 'unsubscribe', 'stop subscription', 'cancel subscription', 'cancel my subscription', 'end subscription', 'stop charging', 'stop payment', 'don\'t renew'],
+      ar: ['الغاء', 'إلغاء', 'الغاء الاشتراك', 'وقف الاشتراك', 'ايقاف'],
+      fr: ['annuler', 'resiliation', 'annuler abonnement', 'desabonner', 'arreter'],
+      es: ['cancelar', 'cancelar suscripcion', 'desuscribir', 'anular', 'dar de baja'],
+      de: ['kuendigen', 'abo kuendigen', 'abbestellen', 'stornieren', 'abmelden'],
+      it: ['cancellare', 'annullare', 'disdire', 'disdetta', 'disiscrivere'],
+      pt: ['cancelar', 'cancelar assinatura', 'desinscrever', 'encerrar'],
+      el: ['ακυρωση', 'ακυρωσω', 'διαγραφη συνδρομης'],
+      zh: ['取消', '取消订阅', '退订', '停止'],
+      ja: ['キャンセル', '解約', '退会', '解除'],
+      ko: ['취소', '구독취소', '해지', '탈퇴']
+    },
     yes: {
       en: ['yes', 'yeah', 'yep', 'sure', 'ok', 'okay', 'sounds good', 'interested', 'tell me more'],
       ar: ['نعم', 'اه', 'حسنا', 'طيب', 'تمام', 'موافق', 'اخبرني اكثر'],
