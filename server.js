@@ -831,7 +831,7 @@ app.post('/api/pos/activate', (req, res) => {
     payload.settings.purchasedEmail = email.toLowerCase();
     fs.writeFileSync(filePath, JSON.stringify(payload));
     console.log(`POS activated: ${email} (sync: ${syncCode}, expires: ${end.toISOString()})`);
-    sendReceiptEmail(email, 'POS', '$239', end.toISOString()).catch(() => {});
+    sendReceiptEmail(email, 'POS', '$239', end.toISOString()).catch(e => console.error('Receipt send error:', e.message));
     res.json({ success: true });
   } catch (err) {
     console.error('Activate error:', err);
@@ -980,7 +980,7 @@ app.post('/api/subscribe', async (req, res) => {
     }
 
     console.log(`Dashboard subscription created: ${email} (customer: ${customerId})`);
-    sendReceiptEmail(email, 'Dashboard', '$39', periodEnd.toISOString()).catch(() => {});
+    sendReceiptEmail(email, 'Dashboard', '$39', periodEnd.toISOString()).catch(e => console.error('Receipt send error:', e.message));
     res.json({
       success: true,
       customer_id: customerId,
@@ -1138,6 +1138,15 @@ app.post('/api/dashboard/cancel-subscription', async (req, res) => {
   } catch (err) { console.error('Cancel error:', err); res.status(500).json({ error: 'Internal error' }); }
 });
 
+// ── Email Transporter ───────────────────────────────────────────
+
+const emailTransporter = nodemailer.createTransport({
+  host: 'smtp.gmail.com',
+  port: 587,
+  secure: false,
+  auth: { user: 'Solis.os.support@gmail.com', pass: process.env.GMAIL_APP_PASSWORD || 'xdjjbbzvxsxpjvin' }
+});
+
 // ── Receipt Emails ──────────────────────────────────────────────
 
 async function sendReceiptEmail(to, product, amount, nextDate) {
@@ -1170,6 +1179,22 @@ async function sendReceiptEmail(to, product, amount, nextDate) {
   } catch (err) { console.error(`Receipt email failed for ${to}:`, err.message); }
 }
 
+// Test receipt email (admin only)
+app.post('/api/test-receipt', async (req, res) => {
+  const { email } = req.body;
+  if (!email) return res.status(400).json({ error: 'Email required' });
+  try {
+    console.log(`Sending test receipt to ${email}...`);
+    const nextDate = new Date();
+    nextDate.setMonth(nextDate.getMonth() + 1);
+    await sendReceiptEmail(email, 'Dashboard', '$39', nextDate.toISOString());
+    res.json({ success: true, message: 'Test receipt sent' });
+  } catch (err) {
+    console.error('Test receipt error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // POS Cancel Subscription
 app.post('/api/pos/cancel-subscription', (req, res) => {
   try {
@@ -1191,13 +1216,6 @@ app.post('/api/pos/cancel-subscription', (req, res) => {
 });
 
 // ── Subscription Renewal Reminders ──────────────────────────────
-
-const emailTransporter = nodemailer.createTransport({
-  host: 'smtp.gmail.com',
-  port: 587,
-  secure: false,
-  auth: { user: 'Solis.os.support@gmail.com', pass: process.env.GMAIL_APP_PASSWORD || 'xdjjbbzvxsxpjvin' }
-});
 
 async function sendRenewalEmail(to, product, daysLeft, renewalDate) {
   const subject = `Your Solis OS ${product} subscription renews in ${daysLeft} days`;
@@ -1295,7 +1313,7 @@ async function checkRenewals() {
                   dashboard_subscription: { ...sub, current_period_end: newEnd.toISOString() }
                 });
                 console.log(`Dashboard auto-renewed: ${user.email} (until ${newEnd.toISOString()})`)
-                sendReceiptEmail(user.email, 'Dashboard', '$39', newEnd.toISOString()).catch(() => {});
+                sendReceiptEmail(user.email, 'Dashboard', '$39', newEnd.toISOString()).catch(e => console.error('Receipt send error:', e.message));
               } else {
                 console.error(`Dashboard renewal payment failed for ${user.email}:`, payData.errors[0]?.detail);
                 await updateUserMeta(user.id, {
