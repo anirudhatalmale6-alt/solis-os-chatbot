@@ -831,6 +831,7 @@ app.post('/api/pos/activate', (req, res) => {
     payload.settings.purchasedEmail = email.toLowerCase();
     fs.writeFileSync(filePath, JSON.stringify(payload));
     console.log(`POS activated: ${email} (sync: ${syncCode}, expires: ${end.toISOString()})`);
+    sendReceiptEmail(email, 'POS', '$239', end.toISOString()).catch(() => {});
     res.json({ success: true });
   } catch (err) {
     console.error('Activate error:', err);
@@ -979,6 +980,7 @@ app.post('/api/subscribe', async (req, res) => {
     }
 
     console.log(`Dashboard subscription created: ${email} (customer: ${customerId})`);
+    sendReceiptEmail(email, 'Dashboard', '$39', periodEnd.toISOString()).catch(() => {});
     res.json({
       success: true,
       customer_id: customerId,
@@ -1093,6 +1095,7 @@ app.post('/api/dashboard/activate', async (req, res) => {
     });
     if (!ok) return res.status(500).json({ error: 'Activation failed' });
     console.log(`Dashboard activated: ${email} (expires: ${end.toISOString()})`);
+    sendReceiptEmail(email, 'Dashboard', '$39', end.toISOString()).catch(() => {});
     res.json({ success: true, subscription: { status: 'active', current_period_end: end.toISOString() } });
   } catch (err) { console.error('Dashboard activate error:', err); res.status(500).json({ error: 'Internal error' }); }
 });
@@ -1134,6 +1137,38 @@ app.post('/api/dashboard/cancel-subscription', async (req, res) => {
     res.json({ success: true, access_until: sub.current_period_end });
   } catch (err) { console.error('Cancel error:', err); res.status(500).json({ error: 'Internal error' }); }
 });
+
+// ── Receipt Emails ──────────────────────────────────────────────
+
+async function sendReceiptEmail(to, product, amount, nextDate) {
+  const dateStr = new Date(nextDate).toLocaleDateString('en-AU', { year: 'numeric', month: 'long', day: 'numeric' });
+  const subject = `Payment Confirmation — Solis OS ${product}`;
+  const html = `
+    <div style="font-family:sans-serif;max-width:600px;margin:0 auto;padding:0">
+      <div style="background:linear-gradient(135deg,#f59e0b,#d97706);padding:32px;text-align:center;border-radius:12px 12px 0 0">
+        <img src="https://solis-os.com/assets/logo.png" alt="Solis OS" style="height:40px;margin:0 auto 12px">
+        <h1 style="color:#fff;font-size:24px;margin:0">Payment Successful</h1>
+      </div>
+      <div style="background:#fff;padding:32px;border:1px solid #E8E9EF;border-top:none;border-radius:0 0 12px 12px">
+        <p style="color:#6B7280;font-size:15px;line-height:1.7;margin:0 0 20px">Thank you for subscribing to Solis OS! Here are your payment details:</p>
+        <div style="background:#F7F8FC;border-radius:10px;padding:20px;margin:0 0 20px">
+          <table style="width:100%;border-collapse:collapse">
+            <tr><td style="padding:8px 0;color:#9CA3AF;font-size:14px">Product</td><td style="padding:8px 0;text-align:right;font-weight:600;font-size:14px;color:#1A1D2E">Solis OS ${product}</td></tr>
+            <tr><td style="padding:8px 0;color:#9CA3AF;font-size:14px">Amount</td><td style="padding:8px 0;text-align:right;font-weight:600;font-size:14px;color:#1A1D2E">${amount} AUD</td></tr>
+            <tr><td style="padding:8px 0;color:#9CA3AF;font-size:14px">Next ${product === 'POS' ? 'renewal' : 'billing'} date</td><td style="padding:8px 0;text-align:right;font-weight:600;font-size:14px;color:#1A1D2E">${dateStr}</td></tr>
+            <tr><td style="padding:8px 0;color:#9CA3AF;font-size:14px">Account</td><td style="padding:8px 0;text-align:right;font-size:14px;color:#1A1D2E">${to}</td></tr>
+          </table>
+        </div>
+        <p style="color:#6B7280;font-size:14px;line-height:1.7;margin:0 0 8px">You now have full access to all features. ${product === 'POS' ? 'Open the POS at solis-os.com/app/' : 'Log in at app.solis-os.com'}</p>
+        <p style="color:#6B7280;font-size:14px;line-height:1.7;margin:0 0 20px">If you have any questions, reply to this email or contact us on WhatsApp at +44 7700 168964.</p>
+        <p style="color:#9CA3AF;font-size:12px;margin:20px 0 0;padding-top:16px;border-top:1px solid #E8E9EF">Solis OS | <a href="https://solis-os.com" style="color:#d97706">solis-os.com</a></p>
+      </div>
+    </div>`;
+  try {
+    await emailTransporter.sendMail({ from: '"Solis OS" <Solis.os.support@gmail.com>', to, subject, html });
+    console.log(`Receipt email sent: ${to} (${product}, ${amount})`);
+  } catch (err) { console.error(`Receipt email failed for ${to}:`, err.message); }
+}
 
 // POS Cancel Subscription
 app.post('/api/pos/cancel-subscription', (req, res) => {
@@ -1259,7 +1294,8 @@ async function checkRenewals() {
                   ...user.user_metadata,
                   dashboard_subscription: { ...sub, current_period_end: newEnd.toISOString() }
                 });
-                console.log(`Dashboard auto-renewed: ${user.email} (until ${newEnd.toISOString()})`);
+                console.log(`Dashboard auto-renewed: ${user.email} (until ${newEnd.toISOString()})`)
+                sendReceiptEmail(user.email, 'Dashboard', '$39', newEnd.toISOString()).catch(() => {});
               } else {
                 console.error(`Dashboard renewal payment failed for ${user.email}:`, payData.errors[0]?.detail);
                 await updateUserMeta(user.id, {
