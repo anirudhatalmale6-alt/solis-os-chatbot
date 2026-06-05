@@ -957,6 +957,8 @@ app.post('/api/subscribe', async (req, res) => {
       location_id: SQUARE_LOCATION,
       note: 'Solis OS Dashboard — Monthly Subscription',
       autocomplete: true,
+      receipt_email: email,
+      receipt_url: 'https://solis-os.com',
     });
     if (payData.errors) { console.error('Square payment error:', payData.errors); return res.status(500).json({ error: 'Payment failed: ' + (payData.errors[0]?.detail || 'Unknown') }); }
 
@@ -979,8 +981,7 @@ app.post('/api/subscribe', async (req, res) => {
       });
     }
 
-    console.log(`Dashboard subscription created: ${email} (customer: ${customerId})`);
-    sendReceiptEmail(email, 'Dashboard', '$39', periodEnd.toISOString()).catch(e => console.error('Receipt send error:', e.message));
+    console.log(`Dashboard subscription created: ${email} (customer: ${customerId}) — Square receipt sent to ${email}`);
     res.json({
       success: true,
       customer_id: customerId,
@@ -1304,6 +1305,8 @@ async function checkRenewals() {
                 location_id: SQUARE_LOCATION,
                 note: 'Solis OS Dashboard — Monthly Renewal',
                 autocomplete: true,
+                receipt_email: user.email,
+                receipt_url: 'https://solis-os.com',
               });
               if (!payData.errors) {
                 const newEnd = new Date(now);
@@ -1312,8 +1315,7 @@ async function checkRenewals() {
                   ...user.user_metadata,
                   dashboard_subscription: { ...sub, current_period_end: newEnd.toISOString() }
                 });
-                console.log(`Dashboard auto-renewed: ${user.email} (until ${newEnd.toISOString()})`)
-                sendReceiptEmail(user.email, 'Dashboard', '$39', newEnd.toISOString()).catch(e => console.error('Receipt send error:', e.message));
+                console.log(`Dashboard auto-renewed: ${user.email} (until ${newEnd.toISOString()}) — Square receipt sent`);
               } else {
                 console.error(`Dashboard renewal payment failed for ${user.email}:`, payData.errors[0]?.detail);
                 await updateUserMeta(user.id, {
