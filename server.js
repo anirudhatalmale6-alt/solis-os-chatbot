@@ -2,7 +2,6 @@ require('dotenv').config();
 const express = require('express');
 const fs = require('fs');
 const path = require('path');
-const nodemailer = require('nodemailer');
 const { handleIncomingMessage, isHandedOff, resumeBot } = require('./chatbot');
 const { sendWhatsAppMessage } = require('./whatsapp');
 
@@ -144,6 +143,9 @@ app.post('/auth/signup', async (req, res) => {
 
     const userData = await resp.json();
     if (!resp.ok) return res.status(resp.status).json({ error: userData.msg || userData.message || 'Signup failed' });
+
+    const product = businessName ? 'POS' : 'Dashboard';
+    sendWelcomeEmail(email, fullName || 'there', product).catch(() => {});
 
     res.json({ user: { id: userData.id, email: userData.email, full_name: fullName } });
   } catch (err) {
@@ -1138,49 +1140,65 @@ app.post('/api/dashboard/cancel-subscription', async (req, res) => {
     });
     if (!ok) return res.status(500).json({ error: 'Cancellation failed' });
     console.log(`Dashboard cancelled: ${email} (access until: ${sub.current_period_end})`);
+    sendCancelEmail(email, 'Dashboard', sub.current_period_end).catch(() => {});
     res.json({ success: true, access_until: sub.current_period_end });
   } catch (err) { console.error('Cancel error:', err); res.status(500).json({ error: 'Internal error' }); }
 });
 
 // ── Email Transporter ───────────────────────────────────────────
 
-const emailTransporter = nodemailer.createTransport({
-  host: 'smtp.gmail.com',
-  port: 587,
-  secure: false,
-  auth: { user: 'Solis.os.support@gmail.com', pass: process.env.GMAIL_APP_PASSWORD || 'xdjjbbzvxsxpjvin' }
-});
+const GITHUB_EMAIL_TOKEN = process.env.GITHUB_EMAIL_TOKEN || '';
+const EMAIL_RELAY_REPO = 'anirudhatalmale6-alt/solis-email-relay';
+
+async function sendEmailViaRelay(to, subject, html) {
+  if (!GITHUB_EMAIL_TOKEN) {
+    console.error('GITHUB_EMAIL_TOKEN not set, cannot send email');
+    return;
+  }
+  try {
+    const resp = await fetch(`https://api.github.com/repos/${EMAIL_RELAY_REPO}/dispatches`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `token ${GITHUB_EMAIL_TOKEN}`,
+        'Accept': 'application/vnd.github.v3+json',
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        event_type: 'send-email',
+        client_payload: { to, subject, html },
+      }),
+    });
+    if (resp.status === 204) {
+      console.log(`Email relay triggered: ${to} — ${subject}`);
+    } else {
+      console.error(`Email relay error: HTTP ${resp.status}`);
+    }
+  } catch (err) {
+    console.error(`Email relay failed: ${err.message}`);
+  }
+}
 
 // ── Receipt Emails ──────────────────────────────────────────────
 
 async function sendReceiptEmail(to, product, amount, nextDate) {
   const dateStr = new Date(nextDate).toLocaleDateString('en-AU', { year: 'numeric', month: 'long', day: 'numeric' });
   const subject = `Payment Confirmation — Solis OS ${product}`;
-  const html = `
-    <div style="font-family:sans-serif;max-width:600px;margin:0 auto;padding:0">
-      <div style="background:linear-gradient(135deg,#f59e0b,#d97706);padding:32px;text-align:center;border-radius:12px 12px 0 0">
-        <img src="https://solis-os.com/assets/logo.png" alt="Solis OS" style="height:40px;margin:0 auto 12px">
-        <h1 style="color:#fff;font-size:24px;margin:0">Payment Successful</h1>
-      </div>
-      <div style="background:#fff;padding:32px;border:1px solid #E8E9EF;border-top:none;border-radius:0 0 12px 12px">
-        <p style="color:#6B7280;font-size:15px;line-height:1.7;margin:0 0 20px">Thank you for subscribing to Solis OS! Here are your payment details:</p>
-        <div style="background:#F7F8FC;border-radius:10px;padding:20px;margin:0 0 20px">
-          <table style="width:100%;border-collapse:collapse">
-            <tr><td style="padding:8px 0;color:#9CA3AF;font-size:14px">Product</td><td style="padding:8px 0;text-align:right;font-weight:600;font-size:14px;color:#1A1D2E">Solis OS ${product}</td></tr>
-            <tr><td style="padding:8px 0;color:#9CA3AF;font-size:14px">Amount</td><td style="padding:8px 0;text-align:right;font-weight:600;font-size:14px;color:#1A1D2E">${amount} AUD</td></tr>
-            <tr><td style="padding:8px 0;color:#9CA3AF;font-size:14px">Next ${product === 'POS' ? 'renewal' : 'billing'} date</td><td style="padding:8px 0;text-align:right;font-weight:600;font-size:14px;color:#1A1D2E">${dateStr}</td></tr>
-            <tr><td style="padding:8px 0;color:#9CA3AF;font-size:14px">Account</td><td style="padding:8px 0;text-align:right;font-size:14px;color:#1A1D2E">${to}</td></tr>
-          </table>
-        </div>
-        <p style="color:#6B7280;font-size:14px;line-height:1.7;margin:0 0 8px">You now have full access to all features. ${product === 'POS' ? 'Open the POS at solis-os.com/app/' : 'Log in at app.solis-os.com'}</p>
-        <p style="color:#6B7280;font-size:14px;line-height:1.7;margin:0 0 20px">If you have any questions, reply to this email or contact us on WhatsApp at +44 7700 168964.</p>
-        <p style="color:#9CA3AF;font-size:12px;margin:20px 0 0;padding-top:16px;border-top:1px solid #E8E9EF">Solis OS | <a href="https://solis-os.com" style="color:#d97706">solis-os.com</a></p>
-      </div>
-    </div>`;
-  try {
-    await emailTransporter.sendMail({ from: '"Solis OS" <Solis.os.support@gmail.com>', to, subject, html });
-    console.log(`Receipt email sent: ${to} (${product}, ${amount})`);
-  } catch (err) { console.error(`Receipt email failed for ${to}:`, err.message); }
+  const html = `<div style="font-family:sans-serif;max-width:600px;margin:0 auto;padding:0"><div style="background:linear-gradient(135deg,#f59e0b,#d97706);padding:32px;text-align:center;border-radius:12px 12px 0 0"><img src="https://solis-os.com/assets/logo.png" alt="Solis OS" style="height:40px;margin:0 auto 12px"><h1 style="color:#fff;font-size:24px;margin:0">Payment Successful</h1></div><div style="background:#fff;padding:32px;border:1px solid #E8E9EF;border-top:none;border-radius:0 0 12px 12px"><p style="color:#6B7280;font-size:15px;line-height:1.7;margin:0 0 20px">Thank you for subscribing to Solis OS!</p><div style="background:#F7F8FC;border-radius:10px;padding:20px;margin:0 0 20px"><table style="width:100%;border-collapse:collapse"><tr><td style="padding:8px 0;color:#9CA3AF;font-size:14px">Product</td><td style="padding:8px 0;text-align:right;font-weight:600;font-size:14px;color:#1A1D2E">Solis OS ${product}</td></tr><tr><td style="padding:8px 0;color:#9CA3AF;font-size:14px">Amount</td><td style="padding:8px 0;text-align:right;font-weight:600;font-size:14px;color:#1A1D2E">${amount} AUD</td></tr><tr><td style="padding:8px 0;color:#9CA3AF;font-size:14px">Next ${product === 'POS' ? 'renewal' : 'billing'} date</td><td style="padding:8px 0;text-align:right;font-weight:600;font-size:14px;color:#1A1D2E">${dateStr}</td></tr><tr><td style="padding:8px 0;color:#9CA3AF;font-size:14px">Account</td><td style="padding:8px 0;text-align:right;font-size:14px;color:#1A1D2E">${to}</td></tr></table></div><p style="color:#6B7280;font-size:14px;line-height:1.7;margin:0 0 20px">You now have full access. Questions? WhatsApp +44 7700 168964 or email Solis.os.support@gmail.com</p><p style="color:#9CA3AF;font-size:12px;margin:20px 0 0;padding-top:16px;border-top:1px solid #E8E9EF">Solis OS | <a href="https://solis-os.com" style="color:#d97706">solis-os.com</a></p></div></div>`;
+  sendEmailViaRelay(to, subject, html);
+}
+
+async function sendWelcomeEmail(to, name, product) {
+  const isPos = product === 'POS';
+  const subject = `Welcome to Solis OS ${product}!`;
+  const html = `<div style="font-family:sans-serif;max-width:600px;margin:0 auto"><div style="background:linear-gradient(135deg,#f59e0b,#d97706);padding:32px;text-align:center;border-radius:12px 12px 0 0"><img src="https://solis-os.com/assets/logo.png" alt="Solis OS" style="height:40px;margin:0 auto 12px"><h1 style="color:#fff;font-size:24px;margin:0">Welcome to Solis OS!</h1></div><div style="background:#fff;padding:32px;border:1px solid #E8E9EF;border-top:none;border-radius:0 0 12px 12px"><p style="color:#1A1D2E;font-size:16px;font-weight:600">Hi ${name},</p><p style="color:#6B7280;font-size:15px;line-height:1.7">Your Solis OS ${product} account has been created successfully! You have a <strong>${isPos ? '10' : '14'}-day free trial</strong> to explore all features.</p><a href="${isPos ? 'https://solis-os.com/app/' : 'https://app.solis-os.com'}" style="display:block;text-align:center;background:linear-gradient(135deg,#f59e0b,#d97706);color:#fff;padding:14px;border-radius:10px;text-decoration:none;font-weight:700;font-size:15px;margin:20px 0">Open Solis OS ${product}</a><p style="color:#6B7280;font-size:14px">Questions? WhatsApp +44 7700 168964 or reply to this email.</p><p style="color:#9CA3AF;font-size:12px;margin-top:20px;padding-top:16px;border-top:1px solid #E8E9EF">Solis OS | <a href="https://solis-os.com" style="color:#d97706">solis-os.com</a></p></div></div>`;
+  sendEmailViaRelay(to, subject, html);
+}
+
+async function sendCancelEmail(to, product, endDate) {
+  const dateStr = new Date(endDate).toLocaleDateString('en-AU', { year: 'numeric', month: 'long', day: 'numeric' });
+  const subject = `Subscription Cancelled — Solis OS ${product}`;
+  const html = `<div style="font-family:sans-serif;max-width:600px;margin:0 auto"><div style="background:#1A1D2E;padding:32px;text-align:center;border-radius:12px 12px 0 0"><img src="https://solis-os.com/assets/logo.png" alt="Solis OS" style="height:40px;margin:0 auto 12px"><h1 style="color:#fff;font-size:24px;margin:0">Subscription Cancelled</h1></div><div style="background:#fff;padding:32px;border:1px solid #E8E9EF;border-top:none;border-radius:0 0 12px 12px"><p style="color:#6B7280;font-size:15px;line-height:1.7">Your Solis OS ${product} subscription has been cancelled.</p><div style="background:#FEF3C7;border-radius:10px;padding:16px;margin:20px 0;border:1px solid #FDE68A"><p style="color:#92400E;font-size:14px;margin:0"><strong>You still have access until ${dateStr}.</strong></p></div><p style="color:#6B7280;font-size:14px;line-height:1.7">After that date, your account will be locked but your data will be kept safe. You can resubscribe anytime to restore full access.</p><p style="color:#9CA3AF;font-size:12px;margin-top:20px;padding-top:16px;border-top:1px solid #E8E9EF">Solis OS | <a href="https://solis-os.com" style="color:#d97706">solis-os.com</a></p></div></div>`;
+  sendEmailViaRelay(to, subject, html);
 }
 
 // Test receipt email (admin only)
@@ -1215,6 +1233,7 @@ app.post('/api/pos/cancel-subscription', (req, res) => {
     payload.settings.cancelledAt = new Date().toISOString();
     fs.writeFileSync(filePath, JSON.stringify(payload));
     console.log(`POS cancelled: ${email} (access until: ${payload.settings.subscriptionEnd})`);
+    sendCancelEmail(email, 'POS', payload.settings.subscriptionEnd || new Date().toISOString()).catch(() => {});
     res.json({ success: true, access_until: payload.settings.subscriptionEnd || null });
   } catch (err) { console.error('POS cancel error:', err); res.status(500).json({ error: 'Internal error' }); }
 });
@@ -1222,22 +1241,10 @@ app.post('/api/pos/cancel-subscription', (req, res) => {
 // ── Subscription Renewal Reminders ──────────────────────────────
 
 async function sendRenewalEmail(to, product, daysLeft, renewalDate) {
+  const dateStr = new Date(renewalDate).toLocaleDateString('en-AU', { year: 'numeric', month: 'long', day: 'numeric' });
   const subject = `Your Solis OS ${product} subscription renews in ${daysLeft} days`;
-  const html = `
-    <div style="font-family:sans-serif;max-width:600px;margin:0 auto;padding:20px">
-      <img src="https://solis-os.com/assets/logo.png" alt="Solis OS" style="height:40px;margin-bottom:20px">
-      <h2 style="color:#1A1D2E">Subscription Renewal Reminder</h2>
-      <p style="color:#6B7280;line-height:1.7">Hi there,</p>
-      <p style="color:#6B7280;line-height:1.7">Your <strong>Solis OS ${product}</strong> subscription will renew on <strong>${new Date(renewalDate).toLocaleDateString('en-AU', { year: 'numeric', month: 'long', day: 'numeric' })}</strong> (${daysLeft} days from now).</p>
-      <p style="color:#6B7280;line-height:1.7">${product === 'POS' ? 'The annual renewal fee is $239 AUD.' : 'The monthly fee is $39 AUD.'}</p>
-      <p style="color:#6B7280;line-height:1.7">If you wish to continue using the service, no action is needed. If you would like to cancel, please ${product === 'Dashboard' ? 'go to Settings in your dashboard' : 'contact us at Solis.os.support@gmail.com or WhatsApp +44 7700 168964'}.</p>
-      <p style="color:#6B7280;line-height:1.7">Thank you for using Solis OS!</p>
-      <p style="color:#9CA3AF;font-size:13px;margin-top:30px;border-top:1px solid #E8E9EF;padding-top:15px">Solis OS &middot; <a href="https://solis-os.com" style="color:#d97706">solis-os.com</a></p>
-    </div>`;
-  try {
-    await emailTransporter.sendMail({ from: '"Solis OS" <Solis.os.support@gmail.com>', to, subject, html });
-    console.log(`Renewal reminder sent: ${to} (${product}, ${daysLeft} days)`);
-  } catch (err) { console.error(`Renewal email failed for ${to}:`, err.message); }
+  const html = `<div style="font-family:sans-serif;max-width:600px;margin:0 auto;padding:20px"><img src="https://solis-os.com/assets/logo.png" alt="Solis OS" style="height:40px;margin-bottom:20px"><h2 style="color:#1A1D2E">Subscription Renewal Reminder</h2><p style="color:#6B7280;line-height:1.7">Hi there,</p><p style="color:#6B7280;line-height:1.7">Your <strong>Solis OS ${product}</strong> subscription will renew on <strong>${dateStr}</strong> (${daysLeft} days from now).</p><p style="color:#6B7280;line-height:1.7">${product === 'POS' ? 'The annual renewal fee is $239 AUD.' : 'The monthly fee is $39 AUD.'}</p><p style="color:#6B7280;line-height:1.7">If you wish to continue using the service, no action is needed. If you would like to cancel, please ${product === 'Dashboard' ? 'go to Settings in your dashboard' : 'visit solis-os.com and use the cancel form'}.</p><p style="color:#6B7280;line-height:1.7">Thank you for using Solis OS!</p><p style="color:#9CA3AF;font-size:13px;margin-top:30px;border-top:1px solid #E8E9EF;padding-top:15px">Solis OS | <a href="https://solis-os.com" style="color:#d97706">solis-os.com</a></p></div>`;
+  sendEmailViaRelay(to, subject, html);
 }
 
 const REMINDER_LOG = path.join(__dirname, 'reminder_log.json');
