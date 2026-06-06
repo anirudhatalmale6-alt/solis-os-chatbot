@@ -117,12 +117,15 @@ app.post('/webhook', async (req, res) => {
 
 app.post('/auth/signup', async (req, res) => {
   try {
-    const { email, password, fullName } = req.body;
+    const { email, password, fullName, businessName } = req.body;
     if (!email || !password) return res.status(400).json({ error: 'Email and password required' });
 
     const SUPABASE_URL = process.env.SUPABASE_URL || 'https://joeklgpncbrhnujzdzsp.supabase.co';
     const SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImpvZWtsZ3BuY2JyaG51anpkenNwIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3ODM1MDU4OSwiZXhwIjoyMDkzOTI2NTg5fQ.qSjr5JCxcw0wzl3_IypMMxWQhFl5FJ4IskiH04YPmiI';
     if (!SERVICE_ROLE_KEY) return res.status(500).json({ error: 'Server not configured' });
+
+    const metadata = { full_name: fullName || '' };
+    if (businessName) metadata.business_name = businessName;
 
     const resp = await fetch(`${SUPABASE_URL}/auth/v1/admin/users`, {
       method: 'POST',
@@ -135,7 +138,7 @@ app.post('/auth/signup', async (req, res) => {
         email,
         password,
         email_confirm: true,
-        user_metadata: { full_name: fullName || '' },
+        user_metadata: metadata,
       }),
     });
 
