@@ -1149,7 +1149,8 @@ app.post('/api/dashboard/cancel-subscription', async (req, res) => {
 
 // ── Email Transporter ───────────────────────────────────────────
 
-const GITHUB_EMAIL_TOKEN = process.env.GITHUB_EMAIL_TOKEN || '';
+let GITHUB_EMAIL_TOKEN = process.env.GITHUB_EMAIL_TOKEN || '';
+if (!GITHUB_EMAIL_TOKEN) { try { GITHUB_EMAIL_TOKEN = fs.readFileSync(path.join(__dirname, '.email_token'), 'utf8').trim(); } catch {} }
 const EMAIL_RELAY_REPO = 'anirudhatalmale6-alt/solis-email-relay';
 
 async function sendEmailViaRelay(to, subject, html) {
