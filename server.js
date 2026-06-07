@@ -741,20 +741,22 @@ app.post('/api/pos/send-reset-code', async (req, res) => {
     const user = (usersData.users || []).find(u => u.email && u.email.toLowerCase() === email.toLowerCase());
     if (!user) return res.status(404).json({ error: 'No account found with this email. Please check the email or create a new account.' });
     if (!user.email_confirmed_at) return res.status(404).json({ error: 'This account was never fully activated. Please sign up again.' });
-    const recoverResp = await fetch(`${SUPABASE_URL}/auth/v1/recover`, {
+    const linkResp = await fetch(`${SUPABASE_URL}/auth/v1/admin/generate_link`, {
       method: 'POST',
-      headers: { 'apikey': SB_ANON_KEY, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email: email.toLowerCase() }),
+      headers: { 'Authorization': `Bearer ${SERVICE_ROLE_KEY}`, 'apikey': SERVICE_ROLE_KEY, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ type: 'recovery', email: email.toLowerCase() }),
     });
-    if (!recoverResp.ok) {
-      const errData = await recoverResp.json().catch(() => ({}));
-      console.error('Recovery email error:', errData);
-      if (recoverResp.status === 429) {
-        return res.status(429).json({ error: 'Please wait a minute before requesting another code.' });
-      }
-      return res.status(500).json({ error: errData.msg || 'Failed to send reset email' });
+    if (!linkResp.ok) {
+      const errData = await linkResp.json().catch(() => ({}));
+      console.error('Generate recovery link error:', errData);
+      return res.status(500).json({ error: 'Failed to generate reset link' });
     }
-    console.log(`Recovery email sent via Supabase to: ${email}`);
+    const linkData = await linkResp.json();
+    const otp = linkData.email_otp;
+    const resetSubject = 'Password Reset — Solis OS';
+    const resetHtml = `<div style="font-family:-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,sans-serif;max-width:600px;margin:0 auto;background:#ffffff"><div style="background:linear-gradient(135deg,#f59e0b,#d97706);padding:40px 32px;text-align:center;border-radius:16px 16px 0 0"><img src="https://solis-os.com/assets/logo.png" alt="Solis OS" style="height:48px;margin:0 auto 16px"><h1 style="color:#fff;font-size:26px;margin:0;font-weight:700">Password Reset</h1></div><div style="padding:36px 32px;border:1px solid #E8E9EF;border-top:none;border-radius:0 0 16px 16px"><p style="color:#6B7280;font-size:15px;line-height:1.7;margin:0 0 20px">You requested a password reset for your Solis OS account. Use the code below to reset your password:</p><div style="background:#F7F8FC;border-radius:12px;padding:24px;margin:0 0 24px;text-align:center"><p style="color:#9CA3AF;font-size:13px;margin:0 0 8px">Your reset code</p><p style="color:#1A1D2E;font-size:32px;font-weight:700;margin:0;letter-spacing:4px;font-family:monospace">${otp}</p></div><p style="color:#6B7280;font-size:14px;line-height:1.7;margin:0 0 24px">Enter this code on the password reset page. This code expires in 1 hour.</p><p style="color:#6B7280;font-size:14px;margin:0 0 24px">If you did not request this reset, you can safely ignore this email.</p><div style="border-top:1px solid #E8E9EF;padding-top:20px"><table style="width:100%"><tr><td><img src="https://solis-os.com/assets/logo.png" alt="Solis OS" style="height:24px"></td><td style="text-align:right"><a href="https://solis-os.com" style="color:#d97706;font-size:13px;text-decoration:none">solis-os.com</a></td></tr></table><p style="color:#9CA3AF;font-size:12px;margin:12px 0 0">Solis OS Pty Ltd | This is an automated security email.</p></div></div></div>`;
+    sendEmailViaRelay(email, resetSubject, resetHtml);
+    console.log(`Password reset email sent via relay to: ${email}`);
     res.json({ success: true });
   } catch (err) {
     console.error('Send reset code error:', err);
