@@ -483,6 +483,44 @@ app.post('/api/pos/register-sync', (req, res) => {
   }
 });
 
+app.get('/api/pos/trial-status/:email', (req, res) => {
+  try {
+    const email = req.params.email.toLowerCase();
+    const map = loadSyncMap();
+    const code = map[email];
+    if (!code) return res.json({ trialActive: true, daysLeft: 10 });
+    const filePath = path.join(POS_DATA_DIR, `${code}.json`);
+    let payload = {};
+    try { payload = JSON.parse(fs.readFileSync(filePath, 'utf8')); } catch {}
+    if (payload.settings?.purchased && !payload.settings?.cancelled) {
+      return res.json({ trialActive: false, subscribed: true, daysLeft: 0 });
+    }
+    const acDate = payload.settings?.accountCreatedAt;
+    if (!acDate) return res.json({ trialActive: true, daysLeft: 10 });
+    const elapsed = Math.floor((Date.now() - new Date(acDate).getTime()) / (1000*60*60*24));
+    const daysLeft = Math.max(0, 10 - elapsed);
+    return res.json({ trialActive: daysLeft > 0, subscribed: !!payload.settings?.purchased, daysLeft });
+  } catch (err) { res.json({ trialActive: true, daysLeft: 10 }); }
+});
+
+app.post('/api/admin/expire-pos-trial', (req, res) => {
+  try {
+    const { email } = req.body;
+    if (!email) return res.status(400).json({ error: 'Email required' });
+    const map = loadSyncMap();
+    const code = map[email.toLowerCase()];
+    if (!code) return res.status(404).json({ error: 'No POS account for this email' });
+    const filePath = path.join(POS_DATA_DIR, `${code}.json`);
+    let payload = {};
+    try { payload = JSON.parse(fs.readFileSync(filePath, 'utf8')); } catch {}
+    if (!payload.settings) payload.settings = {};
+    payload.settings.accountCreatedAt = '2026-05-01T00:00:00Z';
+    fs.writeFileSync(filePath, JSON.stringify(payload));
+    console.log(`POS trial expired for: ${email}`);
+    res.json({ success: true, message: `POS trial expired for ${email}` });
+  } catch (err) { res.status(500).json({ error: 'Failed' }); }
+});
+
 app.get('/api/pos/lookup-sync/:email', (req, res) => {
   try {
     const map = loadSyncMap();
