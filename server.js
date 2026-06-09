@@ -493,7 +493,7 @@ app.get('/api/pos/trial-status/:email', (req, res) => {
     let payload = {};
     try { payload = JSON.parse(fs.readFileSync(filePath, 'utf8')); } catch {}
     if (payload.settings?.purchased && !payload.settings?.cancelled) {
-      return res.json({ trialActive: false, subscribed: true, daysLeft: 0 });
+      return res.json({ trialActive: false, subscribed: true, purchased: true, daysLeft: 0 });
     }
     const acDate = payload.settings?.accountCreatedAt;
     if (!acDate) return res.json({ trialActive: true, daysLeft: 10 });
@@ -515,8 +515,14 @@ app.post('/api/admin/expire-pos-trial', (req, res) => {
     try { payload = JSON.parse(fs.readFileSync(filePath, 'utf8')); } catch {}
     if (!payload.settings) payload.settings = {};
     payload.settings.accountCreatedAt = '2026-05-01T00:00:00Z';
+    delete payload.settings.purchased;
+    delete payload.settings.purchasedAt;
+    delete payload.settings.purchasedEmail;
+    delete payload.settings.cancelled;
+    delete payload.settings.cancelledAt;
+    delete payload.settings.subscriptionEnd;
     fs.writeFileSync(filePath, JSON.stringify(payload));
-    console.log(`POS trial expired for: ${email}`);
+    console.log(`POS trial expired + purchase cleared for: ${email}`);
     res.json({ success: true, message: `POS trial expired for ${email}` });
   } catch (err) { res.status(500).json({ error: 'Failed' }); }
 });
