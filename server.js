@@ -1300,6 +1300,32 @@ async function sendRenewalEmail(to, product, daysLeft, renewalDate) {
   sendEmailViaRelay(to, subject, html);
 }
 
+// ── Automated Booking Reminders ─────────────────────────────────
+
+const REMINDER_CONFIG_FILE = path.join(__dirname, 'reminder_configs.json');
+function loadReminderConfigs() { try { return JSON.parse(fs.readFileSync(REMINDER_CONFIG_FILE, 'utf8')); } catch { return {}; } }
+function saveReminderConfigs(c) { fs.writeFileSync(REMINDER_CONFIG_FILE, JSON.stringify(c, null, 2)); }
+
+app.post('/api/reminders/config', (req, res) => {
+  try {
+    const { businessId, reminder_enabled, reminder_hours, followup_enabled, followup_hours, review_request } = req.body;
+    if (!businessId) return res.status(400).json({ error: 'businessId required' });
+    const configs = loadReminderConfigs();
+    configs[businessId] = { reminder_enabled, reminder_hours, followup_enabled, followup_hours, review_request, updated_at: new Date().toISOString() };
+    saveReminderConfigs(configs);
+    console.log(`Reminder config saved for business ${businessId}`);
+    res.json({ success: true });
+  } catch (err) { res.status(500).json({ error: 'Failed to save' }); }
+});
+
+app.get('/api/reminders/config/:businessId', (req, res) => {
+  try {
+    const configs = loadReminderConfigs();
+    const config = configs[req.params.businessId] || { reminder_enabled: false, reminder_hours: 24, followup_enabled: false, followup_hours: 2, review_request: false };
+    res.json(config);
+  } catch (err) { res.json({ reminder_enabled: false, reminder_hours: 24, followup_enabled: false, followup_hours: 2, review_request: false }); }
+});
+
 const REMINDER_LOG = path.join(__dirname, 'reminder_log.json');
 function loadReminderLog() { try { return JSON.parse(fs.readFileSync(REMINDER_LOG, 'utf8')); } catch { return {}; } }
 function saveReminderLog(log) { fs.writeFileSync(REMINDER_LOG, JSON.stringify(log)); }
