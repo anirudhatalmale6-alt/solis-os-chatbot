@@ -426,6 +426,17 @@ app.delete('/api/admin/leads/:phone', (req, res) => {
   }
 });
 
+app.delete('/api/admin/leads', (req, res) => {
+  try {
+    fs.writeFileSync(LEADS_FILE, JSON.stringify([]));
+    console.log('All leads cleared');
+    res.json({ success: true });
+  } catch (err) {
+    console.error('Clear leads error:', err);
+    res.status(500).json({ error: 'Failed to clear' });
+  }
+});
+
 app.get('/admin/inbox', (req, res) => {
   res.sendFile(path.join(__dirname, 'inbox.html'));
 });
