@@ -1436,6 +1436,66 @@ async function checkRenewals() {
 setInterval(checkRenewals, 6 * 60 * 60 * 1000);
 setTimeout(checkRenewals, 30000);
 
+const BOOKING_REMINDER_LOG = path.join(__dirname, 'booking_reminder_log.json');
+function loadBookingReminderLog() { try { return JSON.parse(fs.readFileSync(BOOKING_REMINDER_LOG, 'utf8')); } catch { return {}; } }
+function saveBookingReminderLog(l) { fs.writeFileSync(BOOKING_REMINDER_LOG, JSON.stringify(l)); }
+
+async function checkBookingReminders() {
+  const configs = loadReminderConfigs();
+  const log = loadBookingReminderLog();
+  const now = new Date();
+  const SUPABASE_URL = process.env.SUPABASE_URL || 'https://joeklgpncbrhnujzdzsp.supabase.co';
+  const SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImpvZWtsZ3BuY2JyaG51anpkenNwIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3ODM1MDU4OSwiZXhwIjoyMDkzOTI2NTg5fQ.qSjr5JCxcw0wzl3_IypMMxWQhFl5FJ4IskiH04YPmiI';
+
+  for (const [bizId, config] of Object.entries(configs)) {
+    if (!config.reminder_enabled && !config.followup_enabled) continue;
+    try {
+      const today = now.toISOString().slice(0, 10);
+      const tomorrow = new Date(now.getTime() + 48 * 60 * 60 * 1000).toISOString().slice(0, 10);
+      const resp = await fetch(`${SUPABASE_URL}/rest/v1/bookings?business_id=eq.${bizId}&date=gte.${today}&date=lte.${tomorrow}&status=eq.confirmed`, {
+        headers: { 'Authorization': `Bearer ${SERVICE_ROLE_KEY}`, 'apikey': SERVICE_ROLE_KEY },
+      });
+      if (!resp.ok) continue;
+      const bookings = await resp.json();
+
+      for (const bk of bookings) {
+        if (!bk.customer_phone || !bk.date || !bk.time) continue;
+        const bookingTime = new Date(`${bk.date}T${bk.time}`);
+        const hoursUntil = (bookingTime - now) / (1000 * 60 * 60);
+
+        if (config.reminder_enabled && hoursUntil > 0 && hoursUntil <= config.reminder_hours) {
+          const key = `reminder_${bk.id}`;
+          if (!log[key]) {
+            const timeStr = bookingTime.toLocaleTimeString('en-AU', { hour: 'numeric', minute: '2-digit', hour12: true });
+            const dateStr = bookingTime.toLocaleDateString('en-AU', { weekday: 'long', month: 'long', day: 'numeric' });
+            const msg = `Hi ${bk.customer_name}! This is a friendly reminder about your upcoming appointment:\n\n${bk.service_name || bk.notes || 'Your appointment'}\n${dateStr} at ${timeStr}\n\nSee you soon!`;
+            const phone = bk.customer_phone.replace(/[^0-9]/g, '');
+            await sendWhatsAppMessage(phone, msg).catch(e => console.error('Reminder send failed:', e.message));
+            log[key] = new Date().toISOString();
+            saveBookingReminderLog(log);
+            console.log(`Booking reminder sent to ${bk.customer_name} (${phone})`);
+          }
+        }
+
+        if (config.followup_enabled && hoursUntil < -1 * config.followup_hours) {
+          const key = `followup_${bk.id}`;
+          if (!log[key]) {
+            const msg = `Hi ${bk.customer_name}! Thank you for visiting us today. We hope you had a great experience! If you have a moment, we would love to hear your feedback.`;
+            const phone = bk.customer_phone.replace(/[^0-9]/g, '');
+            await sendWhatsAppMessage(phone, msg).catch(e => console.error('Followup send failed:', e.message));
+            log[key] = new Date().toISOString();
+            saveBookingReminderLog(log);
+            console.log(`Followup sent to ${bk.customer_name} (${phone})`);
+          }
+        }
+      }
+    } catch (err) { console.error(`Booking reminder error for ${bizId}:`, err.message); }
+  }
+}
+
+setInterval(checkBookingReminders, 5 * 60 * 1000);
+setTimeout(checkBookingReminders, 60000);
+
 if (require.main === module) {
   const PORT = process.env.PORT || 3000;
   app.listen(PORT, () => {
