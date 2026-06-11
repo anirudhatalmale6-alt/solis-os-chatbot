@@ -1205,11 +1205,11 @@ app.post('/api/dashboard/cancel-subscription', async (req, res) => {
 
 // ── Send Invoice Email (from business name via Solis OS) ────────
 app.post('/api/send-invoice-email', async (req, res) => {
-  const { to, subject, body, from_name, reply_to } = req.body;
-  if (!to || !subject || !body) return res.status(400).json({ error: 'to, subject, body required' });
+  const { to, subject, body, html: customHtml, from_name, reply_to } = req.body;
+  if (!to || !subject || !(body || customHtml)) return res.status(400).json({ error: 'to, subject, body or html required' });
 
   try {
-    const html = `<div style="font-family:-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,sans-serif;max-width:600px;margin:0 auto;background:#fff;padding:32px"><pre style="white-space:pre-wrap;font-family:inherit;font-size:14px;color:#1a1a1a;line-height:1.7">${body.replace(/</g,'&lt;').replace(/>/g,'&gt;')}</pre><hr style="border:none;border-top:1px solid #E8E9EF;margin:24px 0"><p style="color:#9CA3AF;font-size:12px">Sent via Solis OS</p></div>`;
+    const emailHtml = customHtml || `<div style="font-family:-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,sans-serif;max-width:600px;margin:0 auto;background:#fff;padding:32px"><pre style="white-space:pre-wrap;font-family:inherit;font-size:14px;color:#1a1a1a;line-height:1.7">${body.replace(/</g,'&lt;').replace(/>/g,'&gt;')}</pre><hr style="border:none;border-top:1px solid #E8E9EF;margin:24px 0"><p style="color:#9CA3AF;font-size:12px">Sent via Solis OS</p></div>`;
 
     const senderName = from_name ? `${from_name} via Solis OS` : 'Solis OS';
     const transporter = nodemailer.createTransport({
@@ -1222,7 +1222,7 @@ app.post('/api/send-invoice-email', async (req, res) => {
       replyTo: reply_to || undefined,
       to,
       subject,
-      html,
+      html: emailHtml,
     });
 
     console.log(`Invoice email sent: ${senderName} -> ${to} (${subject})`);
@@ -1501,10 +1501,18 @@ async function checkBookingReminders() {
             const dateStr = bookingTime.toLocaleDateString('en-AU', { weekday: 'long', month: 'long', day: 'numeric' });
             const msg = `Hi ${bk.customer_name}! This is a friendly reminder about your upcoming appointment:\n\n${bk.service_name || bk.notes || 'Your appointment'}\n${dateStr} at ${timeStr}\n\nSee you soon!`;
             const phone = bk.customer_phone.replace(/[^0-9]/g, '');
-            await sendWhatsAppMessage(phone, msg).catch(e => console.error('Reminder send failed:', e.message));
-            log[key] = new Date().toISOString();
-            saveBookingReminderLog(log);
-            console.log(`Booking reminder sent to ${bk.customer_name} (${phone})`);
+            try {
+              const sendResp = await fetch('http://127.0.0.1:3003/api/whatsapp/send', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ business_id: bizId, phone, message: msg }),
+              });
+              const sendResult = await sendResp.json();
+              if (!sendResult.success && !sendResult.messageId) throw new Error(sendResult.error || 'Send failed');
+              log[key] = new Date().toISOString();
+              saveBookingReminderLog(log);
+              console.log(`Booking reminder sent to ${bk.customer_name} (${phone}) via Baileys`);
+            } catch (e) { console.error('Reminder send failed:', e.message); }
           }
         }
 
@@ -1513,10 +1521,18 @@ async function checkBookingReminders() {
           if (!log[key]) {
             const msg = `Hi ${bk.customer_name}! Thank you for visiting us today. We hope you had a great experience! If you have a moment, we would love to hear your feedback.`;
             const phone = bk.customer_phone.replace(/[^0-9]/g, '');
-            await sendWhatsAppMessage(phone, msg).catch(e => console.error('Followup send failed:', e.message));
-            log[key] = new Date().toISOString();
-            saveBookingReminderLog(log);
-            console.log(`Followup sent to ${bk.customer_name} (${phone})`);
+            try {
+              const sendResp = await fetch('http://127.0.0.1:3003/api/whatsapp/send', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ business_id: bizId, phone, message: msg }),
+              });
+              const sendResult = await sendResp.json();
+              if (!sendResult.success && !sendResult.messageId) throw new Error(sendResult.error || 'Send failed');
+              log[key] = new Date().toISOString();
+              saveBookingReminderLog(log);
+              console.log(`Followup sent to ${bk.customer_name} (${phone}) via Baileys`);
+            } catch (e) { console.error('Followup send failed:', e.message); }
           }
         }
       }
