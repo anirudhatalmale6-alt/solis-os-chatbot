@@ -2,6 +2,7 @@ require('dotenv').config();
 const express = require('express');
 const fs = require('fs');
 const path = require('path');
+const nodemailer = require('nodemailer');
 const { handleIncomingMessage, isHandedOff, resumeBot } = require('./chatbot');
 const { sendWhatsAppMessage } = require('./whatsapp');
 
@@ -1202,17 +1203,35 @@ app.post('/api/dashboard/cancel-subscription', async (req, res) => {
   } catch (err) { console.error('Cancel error:', err); res.status(500).json({ error: 'Internal error' }); }
 });
 
-// ── Send Invoice Email ──────────────────────────────────────────
+// ── Send Invoice Email (from business's own email) ──────────────
 app.post('/api/send-invoice-email', async (req, res) => {
-  const { to, subject, body } = req.body;
+  const { to, subject, body, from_email, from_password, from_name } = req.body;
   if (!to || !subject || !body) return res.status(400).json({ error: 'to, subject, body required' });
+  if (!from_email || !from_password) return res.status(400).json({ error: 'Email settings not configured. Go to Settings and add your business email and app password.' });
+
   try {
     const html = `<div style="font-family:-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,sans-serif;max-width:600px;margin:0 auto;background:#fff;padding:32px"><pre style="white-space:pre-wrap;font-family:inherit;font-size:14px;color:#1a1a1a;line-height:1.7">${body.replace(/</g,'&lt;').replace(/>/g,'&gt;')}</pre><hr style="border:none;border-top:1px solid #E8E9EF;margin:24px 0"><p style="color:#9CA3AF;font-size:12px">Sent via Solis OS</p></div>`;
-    await sendEmailViaRelay(to, subject, html);
+
+    const transporter = nodemailer.createTransport({
+      service: 'gmail',
+      auth: { user: from_email, pass: from_password },
+    });
+
+    await transporter.sendMail({
+      from: from_name ? `${from_name} <${from_email}>` : from_email,
+      to,
+      subject,
+      html,
+    });
+
+    console.log(`Invoice email sent: ${from_email} -> ${to} (${subject})`);
     res.json({ success: true });
   } catch (err) {
     console.error('Invoice email error:', err.message);
-    res.status(500).json({ error: 'Failed to send email' });
+    if (err.message.includes('Invalid login') || err.message.includes('auth') || err.message.includes('credentials')) {
+      return res.status(400).json({ error: 'Email login failed. Check your email and app password in Settings. For Gmail, you need a Google App Password (not your regular password).' });
+    }
+    res.status(500).json({ error: 'Failed to send email: ' + err.message });
   }
 });
 
