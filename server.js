@@ -1202,6 +1202,20 @@ app.post('/api/dashboard/cancel-subscription', async (req, res) => {
   } catch (err) { console.error('Cancel error:', err); res.status(500).json({ error: 'Internal error' }); }
 });
 
+// ── Send Invoice Email ──────────────────────────────────────────
+app.post('/api/send-invoice-email', async (req, res) => {
+  const { to, subject, body } = req.body;
+  if (!to || !subject || !body) return res.status(400).json({ error: 'to, subject, body required' });
+  try {
+    const html = `<div style="font-family:-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,sans-serif;max-width:600px;margin:0 auto;background:#fff;padding:32px"><pre style="white-space:pre-wrap;font-family:inherit;font-size:14px;color:#1a1a1a;line-height:1.7">${body.replace(/</g,'&lt;').replace(/>/g,'&gt;')}</pre><hr style="border:none;border-top:1px solid #E8E9EF;margin:24px 0"><p style="color:#9CA3AF;font-size:12px">Sent via Solis OS</p></div>`;
+    await sendEmailViaRelay(to, subject, html);
+    res.json({ success: true });
+  } catch (err) {
+    console.error('Invoice email error:', err.message);
+    res.status(500).json({ error: 'Failed to send email' });
+  }
+});
+
 // ── Email Transporter ───────────────────────────────────────────
 
 let GITHUB_EMAIL_TOKEN = process.env.GITHUB_EMAIL_TOKEN || '';
