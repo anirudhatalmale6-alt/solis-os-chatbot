@@ -465,13 +465,17 @@ const POS_DATA_DIR = path.join(__dirname, 'pos_sync_data');
 if (!fs.existsSync(POS_DATA_DIR)) fs.mkdirSync(POS_DATA_DIR, { recursive: true });
 
 function mergeRecords(existing, incoming) {
+  if (!incoming || incoming.length === 0) return existing || [];
   const map = {};
-  (existing || []).forEach(r => { if (r.syncId) map[r.syncId] = r; });
+  (existing || []).forEach(r => { const key = r.syncId || r.id; if (key) map[key] = r; });
   (incoming || []).forEach(r => {
-    if (!r.syncId) return;
-    const ex = map[r.syncId];
+    const key = r.syncId || r.id;
+    if (!key) return;
+    const ex = map[key];
     if (!ex || (r.updatedAt && (!ex.updatedAt || r.updatedAt > ex.updatedAt))) {
-      map[r.syncId] = r;
+      map[key] = r;
+    } else if (!ex) {
+      map[key] = r;
     }
   });
   return Object.values(map);
@@ -562,13 +566,13 @@ app.post('/api/pos/sync', (req, res) => {
     let existing = {};
     try { existing = JSON.parse(fs.readFileSync(filePath, 'utf8')); } catch {}
     const payload = { businessName: businessName || existing.businessName || 'My Business', data, syncedAt: new Date().toISOString() };
-    if (products !== undefined) payload.products = mergeRecords(existing.products, products);
+    if (products !== undefined) payload.products = products;
     else if (existing.products) payload.products = existing.products;
-    if (promotions !== undefined) payload.promotions = mergeRecords(existing.promotions, promotions);
+    if (promotions !== undefined) payload.promotions = promotions;
     else if (existing.promotions) payload.promotions = existing.promotions;
-    if (staff !== undefined) payload.staff = mergeRecords(existing.staff, staff);
+    if (staff !== undefined) payload.staff = staff;
     else if (existing.staff) payload.staff = existing.staff;
-    if (customers !== undefined) payload.customers = mergeRecords(existing.customers, customers);
+    if (customers !== undefined) payload.customers = customers;
     else if (existing.customers) payload.customers = existing.customers;
     if (sales !== undefined) payload.sales = mergeRecords(existing.sales, sales);
     else if (existing.sales) payload.sales = existing.sales;
