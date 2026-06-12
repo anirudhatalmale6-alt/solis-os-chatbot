@@ -1206,27 +1206,87 @@ app.post('/api/dashboard/cancel-subscription', async (req, res) => {
 
 // ── Send Invoice Email (from business name via Solis OS) ────────
 app.post('/api/send-invoice-email', async (req, res) => {
-  const { to, subject, body, html: customHtml, from_name, reply_to } = req.body;
-  if (!to || !subject || !(body || customHtml)) return res.status(400).json({ error: 'to, subject, body or html required' });
+  const { to, subject, body, html: customHtml, from_name, reply_to, invoice_image, invoice_number, total_amount, customer_name } = req.body;
+  if (!to || !subject) return res.status(400).json({ error: 'to and subject required' });
 
   try {
-    const emailHtml = customHtml || `<div style="font-family:-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,sans-serif;max-width:600px;margin:0 auto;background:#fff;padding:32px"><pre style="white-space:pre-wrap;font-family:inherit;font-size:14px;color:#1a1a1a;line-height:1.7">${body.replace(/</g,'&lt;').replace(/>/g,'&gt;')}</pre><hr style="border:none;border-top:1px solid #E8E9EF;margin:24px 0"><p style="color:#9CA3AF;font-size:12px">Sent via Solis OS</p></div>`;
-
     const senderName = from_name ? `${from_name} via Solis OS` : 'Solis OS';
     const transporter = nodemailer.createTransport({
       service: 'gmail',
       auth: { user: 'solis.os.support@gmail.com', pass: 'adndusbhftozhoyw' },
     });
 
-    await transporter.sendMail({
+    const mailOptions = {
       from: `${senderName} <solis.os.support@gmail.com>`,
       replyTo: reply_to || undefined,
       to,
       subject,
-      html: emailHtml,
-    });
+      attachments: [],
+    };
 
-    console.log(`Invoice email sent: ${senderName} -> ${to} (${subject})`);
+    if (invoice_image) {
+      let pdfBuffer;
+      try {
+        const { PDFDocument } = require('pdf-lib');
+        const pdfDoc = await PDFDocument.create();
+        const imgBuffer = Buffer.from(invoice_image, 'base64');
+        const pngImage = await pdfDoc.embedPng(imgBuffer);
+        const { width: imgW, height: imgH } = pngImage.scale(1);
+        const pageW = 612, pageH = 792;
+        const margin = 30;
+        const availW = pageW - margin * 2, availH = pageH - margin * 2;
+        const scale = Math.min(availW / imgW, availH / imgH, 1);
+        const drawW = imgW * scale, drawH = imgH * scale;
+        const page = pdfDoc.addPage([pageW, pageH]);
+        page.drawImage(pngImage, {
+          x: (pageW - drawW) / 2,
+          y: pageH - margin - drawH,
+          width: drawW,
+          height: drawH,
+        });
+        pdfBuffer = Buffer.from(await pdfDoc.save());
+      } catch (pdfErr) {
+        console.error('PDF generation failed, sending as image:', pdfErr.message);
+        pdfBuffer = null;
+      }
+
+      if (pdfBuffer) {
+        mailOptions.attachments.push({
+          filename: `Invoice-${invoice_number || 'document'}.pdf`,
+          content: pdfBuffer,
+          contentType: 'application/pdf',
+        });
+      } else {
+        mailOptions.attachments.push({
+          filename: `Invoice-${invoice_number || 'document'}.png`,
+          content: Buffer.from(invoice_image, 'base64'),
+          contentType: 'image/png',
+        });
+      }
+
+      const bizName = from_name || 'Your service provider';
+      mailOptions.html = `<div style="font-family:-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,sans-serif;max-width:600px;margin:0 auto;background:#ffffff">
+        <div style="background:linear-gradient(135deg,#f59e0b,#d97706);padding:32px;text-align:center;border-radius:12px 12px 0 0">
+          <h1 style="color:#fff;font-size:22px;margin:0;font-weight:700">Invoice from ${bizName}</h1>
+        </div>
+        <div style="padding:32px;border:1px solid #E8E9EF;border-top:none;border-radius:0 0 12px 12px">
+          <p style="color:#1A1D2E;font-size:16px;margin:0 0 16px">Hi${customer_name ? ' ' + customer_name : ''},</p>
+          <p style="color:#6B7280;font-size:15px;line-height:1.7;margin:0 0 20px">Please find your invoice <strong style="color:#1A1D2E">${invoice_number || ''}</strong>${total_amount ? ' for <strong style="color:#1A1D2E">' + total_amount + '</strong>' : ''} attached as a PDF.</p>
+          <div style="background:#FFFBEB;border:1px solid #FDE68A;border-radius:8px;padding:16px;margin:0 0 20px">
+            <p style="color:#92400E;font-size:14px;margin:0;font-weight:600">The invoice PDF is attached to this email. You can download and print it directly.</p>
+          </div>
+          <p style="color:#6B7280;font-size:14px;line-height:1.6;margin:0">If you have any questions about this invoice, please reply to this email or contact us directly.</p>
+          <div style="border-top:1px solid #E8E9EF;padding-top:16px;margin-top:24px">
+            <p style="color:#9CA3AF;font-size:12px;margin:0">Sent via Solis OS</p>
+          </div>
+        </div>
+      </div>`;
+    } else {
+      mailOptions.html = customHtml || `<div style="font-family:-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,sans-serif;max-width:600px;margin:0 auto;background:#fff;padding:32px"><pre style="white-space:pre-wrap;font-family:inherit;font-size:14px;color:#1a1a1a;line-height:1.7">${(body || '').replace(/</g,'&lt;').replace(/>/g,'&gt;')}</pre><hr style="border:none;border-top:1px solid #E8E9EF;margin:24px 0"><p style="color:#9CA3AF;font-size:12px">Sent via Solis OS</p></div>`;
+    }
+
+    await transporter.sendMail(mailOptions);
+    console.log(`Invoice email sent: ${senderName} -> ${to} (${subject})${invoice_image ? ' [PDF attached]' : ''}`);
     res.json({ success: true });
   } catch (err) {
     console.error('Invoice email error:', err.message);
