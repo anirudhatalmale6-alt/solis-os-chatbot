@@ -117,14 +117,15 @@ app.post('/webhook', async (req, res) => {
 
 app.post('/auth/signup', async (req, res) => {
   try {
-    const { email, password, fullName, businessName } = req.body;
+    const { email, password, fullName, businessName, role } = req.body;
     if (!email || !password) return res.status(400).json({ error: 'Email and password required' });
 
     const SUPABASE_URL = process.env.SUPABASE_URL || 'https://joeklgpncbrhnujzdzsp.supabase.co';
     const SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImpvZWtsZ3BuY2JyaG51anpkenNwIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3ODM1MDU4OSwiZXhwIjoyMDkzOTI2NTg5fQ.qSjr5JCxcw0wzl3_IypMMxWQhFl5FJ4IskiH04YPmiI';
     if (!SERVICE_ROLE_KEY) return res.status(500).json({ error: 'Server not configured' });
 
-    const metadata = { full_name: fullName || '' };
+    const userRole = role || (businessName ? 'business' : 'business');
+    const metadata = { full_name: fullName || '', role: userRole };
     if (businessName) metadata.business_name = businessName;
 
     const resp = await fetch(`${SUPABASE_URL}/auth/v1/admin/users`, {
@@ -145,7 +146,7 @@ app.post('/auth/signup', async (req, res) => {
     const userData = await resp.json();
     if (!resp.ok) return res.status(resp.status).json({ error: userData.msg || userData.message || 'Signup failed' });
 
-    const product = businessName ? 'POS' : 'Dashboard';
+    const product = businessName ? 'POS' : (userRole === 'customer' ? 'Customer' : 'Dashboard');
     sendWelcomeEmail(email, fullName || 'there', product).catch(() => {});
 
     res.json({ user: { id: userData.id, email: userData.email, full_name: fullName } });
@@ -1279,13 +1280,23 @@ async function sendReceiptEmail(to, product, amount, nextDate) {
 
 async function sendWelcomeEmail(to, name, product) {
   const isPos = product === 'POS';
+  const isCustomer = product === 'Customer';
   const trialDays = isPos ? '10' : '14';
-  const features = isPos
-    ? '<p style="color:#92400E;font-size:14px;margin:4px 0">&#10003; Scan barcodes and process sales</p><p style="color:#92400E;font-size:14px;margin:4px 0">&#10003; Manage your inventory in real-time</p><p style="color:#92400E;font-size:14px;margin:4px 0">&#10003; Track sales reports and analytics</p><p style="color:#92400E;font-size:14px;margin:4px 0">&#10003; Print or email receipts</p><p style="color:#92400E;font-size:14px;margin:4px 0">&#10003; Multi-staff PIN login</p>'
-    : '<p style="color:#92400E;font-size:14px;margin:4px 0">&#10003; Manage bookings and schedule</p><p style="color:#92400E;font-size:14px;margin:4px 0">&#10003; AI WhatsApp assistant for your customers</p><p style="color:#92400E;font-size:14px;margin:4px 0">&#10003; Customer management and CRM</p><p style="color:#92400E;font-size:14px;margin:4px 0">&#10003; Invoices, reports, and analytics</p><p style="color:#92400E;font-size:14px;margin:4px 0">&#10003; Marketing campaigns and promo codes</p>';
-  const link = isPos ? 'https://solis-os.com/app/' : 'https://app.solis-os.com';
-  const subject = `Welcome to Solis OS ${product}!`;
-  const html = `<div style="font-family:-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,sans-serif;max-width:600px;margin:0 auto;background:#ffffff"><div style="background:linear-gradient(135deg,#f59e0b,#d97706);padding:40px 32px;text-align:center;border-radius:16px 16px 0 0"><img src="https://solis-os.com/assets/logo.png" alt="Solis OS" style="height:48px;margin:0 auto 16px"><h1 style="color:#fff;font-size:26px;margin:0;font-weight:700">Welcome to Solis OS!</h1><p style="color:rgba(255,255,255,0.9);font-size:15px;margin:8px 0 0">Your business management platform is ready</p></div><div style="padding:36px 32px;border:1px solid #E8E9EF;border-top:none;border-radius:0 0 16px 16px"><p style="color:#1A1D2E;font-size:17px;font-weight:600;margin:0 0 12px">Hi ${name},</p><p style="color:#6B7280;font-size:15px;line-height:1.7;margin:0 0 20px">Your Solis OS ${product} account has been created successfully. You now have a <strong style="color:#1A1D2E">${trialDays}-day free trial</strong> with full access to every feature.</p><div style="background:linear-gradient(135deg,#FFFBEB,#FEF3C7);border-radius:12px;padding:24px;margin:0 0 24px;border:1px solid #FDE68A"><p style="color:#92400E;font-size:14px;font-weight:600;margin:0 0 12px">Here is what you can do:</p>${features}</div><a href="${link}" style="display:block;text-align:center;background:linear-gradient(135deg,#f59e0b,#d97706);color:#fff;padding:16px;border-radius:12px;text-decoration:none;font-weight:700;font-size:16px;margin:0 0 24px;box-shadow:0 4px 12px rgba(245,158,11,0.3)">Open Your ${product}</a><div style="background:#F7F8FC;border-radius:12px;padding:20px;margin:0 0 24px"><p style="color:#1A1D2E;font-size:14px;font-weight:600;margin:0 0 8px">Need help getting started?</p><p style="color:#6B7280;font-size:14px;margin:0;line-height:1.6">Email us at solis.os.support@gmail.com or message us on WhatsApp at <strong>+44 7700 168964</strong>. We are here to help you set up your business.</p></div><div style="border-top:1px solid #E8E9EF;padding-top:20px"><table style="width:100%"><tr><td><img src="https://solis-os.com/assets/logo.png" alt="Solis OS" style="height:24px"></td><td style="text-align:right"><a href="https://solis-os.com" style="color:#d97706;font-size:13px;text-decoration:none">solis-os.com</a></td></tr></table><p style="color:#9CA3AF;font-size:12px;margin:12px 0 0">Solis OS Pty Ltd | You are receiving this email because you created an account on Solis OS.</p></div></div></div>`;
+  let features;
+  if (isPos) {
+    features = '<p style="color:#92400E;font-size:14px;margin:4px 0">&#10003; Scan barcodes and process sales</p><p style="color:#92400E;font-size:14px;margin:4px 0">&#10003; Manage your inventory in real-time</p><p style="color:#92400E;font-size:14px;margin:4px 0">&#10003; Track sales reports and analytics</p><p style="color:#92400E;font-size:14px;margin:4px 0">&#10003; Print or email receipts</p><p style="color:#92400E;font-size:14px;margin:4px 0">&#10003; Multi-staff PIN login</p>';
+  } else if (isCustomer) {
+    features = '<p style="color:#92400E;font-size:14px;margin:4px 0">&#10003; Browse and discover businesses near you</p><p style="color:#92400E;font-size:14px;margin:4px 0">&#10003; Book appointments in seconds</p><p style="color:#92400E;font-size:14px;margin:4px 0">&#10003; Track your upcoming bookings</p><p style="color:#92400E;font-size:14px;margin:4px 0">&#10003; Get reminders before your appointments</p><p style="color:#92400E;font-size:14px;margin:4px 0">&#10003; Leave reviews for businesses you visit</p>';
+  } else {
+    features = '<p style="color:#92400E;font-size:14px;margin:4px 0">&#10003; Manage bookings and schedule</p><p style="color:#92400E;font-size:14px;margin:4px 0">&#10003; AI WhatsApp assistant for your customers</p><p style="color:#92400E;font-size:14px;margin:4px 0">&#10003; Customer management and CRM</p><p style="color:#92400E;font-size:14px;margin:4px 0">&#10003; Invoices, reports, and analytics</p><p style="color:#92400E;font-size:14px;margin:4px 0">&#10003; Marketing campaigns and promo codes</p>';
+  }
+  const link = isPos ? 'https://solis-os.com/app/' : (isCustomer ? 'https://app.solis-os.com/explore' : 'https://app.solis-os.com');
+  const heroSubtitle = isCustomer ? 'Your booking account is ready' : 'Your business management platform is ready';
+  const subject = isCustomer ? 'Welcome to Solis OS!' : `Welcome to Solis OS ${product}!`;
+  const buttonText = isCustomer ? 'Explore Businesses' : `Open Your ${product}`;
+  const helpText = isCustomer ? 'We are here to help you find and book services.' : 'We are here to help you set up your business.';
+  const trialLine = isCustomer ? `Your account is ready. Start browsing businesses and booking appointments right away.` : `Your Solis OS ${product} account has been created successfully. You now have a <strong style="color:#1A1D2E">${trialDays}-day free trial</strong> with full access to every feature.`;
+  const html = `<div style="font-family:-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,sans-serif;max-width:600px;margin:0 auto;background:#ffffff"><div style="background:linear-gradient(135deg,#f59e0b,#d97706);padding:40px 32px;text-align:center;border-radius:16px 16px 0 0"><img src="https://solis-os.com/assets/logo.png" alt="Solis OS" style="height:48px;margin:0 auto 16px"><h1 style="color:#fff;font-size:26px;margin:0;font-weight:700">Welcome to Solis OS!</h1><p style="color:rgba(255,255,255,0.9);font-size:15px;margin:8px 0 0">${heroSubtitle}</p></div><div style="padding:36px 32px;border:1px solid #E8E9EF;border-top:none;border-radius:0 0 16px 16px"><p style="color:#1A1D2E;font-size:17px;font-weight:600;margin:0 0 12px">Hi ${name},</p><p style="color:#6B7280;font-size:15px;line-height:1.7;margin:0 0 20px">${trialLine}</p><div style="background:linear-gradient(135deg,#FFFBEB,#FEF3C7);border-radius:12px;padding:24px;margin:0 0 24px;border:1px solid #FDE68A"><p style="color:#92400E;font-size:14px;font-weight:600;margin:0 0 12px">Here is what you can do:</p>${features}</div><a href="${link}" style="display:block;text-align:center;background:linear-gradient(135deg,#f59e0b,#d97706);color:#fff;padding:16px;border-radius:12px;text-decoration:none;font-weight:700;font-size:16px;margin:0 0 24px;box-shadow:0 4px 12px rgba(245,158,11,0.3)">${buttonText}</a><div style="background:#F7F8FC;border-radius:12px;padding:20px;margin:0 0 24px"><p style="color:#1A1D2E;font-size:14px;font-weight:600;margin:0 0 8px">Need help getting started?</p><p style="color:#6B7280;font-size:14px;margin:0;line-height:1.6">Email us at solis.os.support@gmail.com or message us on WhatsApp at <strong>+44 7700 168964</strong>. ${helpText}</p></div><div style="border-top:1px solid #E8E9EF;padding-top:20px"><table style="width:100%"><tr><td><img src="https://solis-os.com/assets/logo.png" alt="Solis OS" style="height:24px"></td><td style="text-align:right"><a href="https://solis-os.com" style="color:#d97706;font-size:13px;text-decoration:none">solis-os.com</a></td></tr></table><p style="color:#9CA3AF;font-size:12px;margin:12px 0 0">Solis OS Pty Ltd | You are receiving this email because you created an account on Solis OS.</p></div></div></div>`;
   sendEmailViaRelay(to, subject, html);
 }
 
