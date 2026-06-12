@@ -14,6 +14,38 @@ function saveWhatsappData(data) {
   fs.writeFileSync(WHATSAPP_DATA_FILE, JSON.stringify(data, null, 2));
 }
 
+const EMAIL_CONFIGS_FILE = path.join(__dirname, 'email_configs.json');
+function loadEmailConfigs() {
+  try { return JSON.parse(fs.readFileSync(EMAIL_CONFIGS_FILE, 'utf8')); } catch { return {}; }
+}
+function saveEmailConfigs(data) {
+  fs.writeFileSync(EMAIL_CONFIGS_FILE, JSON.stringify(data, null, 2));
+}
+
+const SMTP_PROVIDERS = {
+  gmail: { host: 'smtp.gmail.com', port: 587, secure: false },
+  outlook: { host: 'smtp.office365.com', port: 587, secure: false },
+  yahoo: { host: 'smtp.mail.yahoo.com', port: 587, secure: false },
+};
+
+function createBusinessTransporter(config) {
+  const provider = SMTP_PROVIDERS[config.provider];
+  if (provider) {
+    return nodemailer.createTransport({
+      host: provider.host,
+      port: provider.port,
+      secure: provider.secure,
+      auth: { user: config.email, pass: config.password },
+    });
+  }
+  return nodemailer.createTransport({
+    host: config.smtp_host,
+    port: parseInt(config.smtp_port) || 587,
+    secure: parseInt(config.smtp_port) === 465,
+    auth: { user: config.email, pass: config.password },
+  });
+}
+
 const processedMessages = new Set();
 function isDuplicate(msgId) {
   if (!msgId || processedMessages.has(msgId)) return true;
@@ -1208,21 +1240,111 @@ app.post('/api/dashboard/cancel-subscription', async (req, res) => {
   } catch (err) { console.error('Cancel error:', err); res.status(500).json({ error: 'Internal error' }); }
 });
 
+// ── Business Email Configuration ────────────────────────────────
+app.get('/api/email-config/:businessId', (req, res) => {
+  const configs = loadEmailConfigs();
+  const cfg = configs[req.params.businessId];
+  if (!cfg) return res.json({ configured: false });
+  res.json({
+    configured: true,
+    provider: cfg.provider,
+    email: cfg.email,
+    smtp_host: cfg.smtp_host || '',
+    smtp_port: cfg.smtp_port || '',
+    password_set: !!cfg.password,
+  });
+});
+
+app.post('/api/email-config/:businessId', (req, res) => {
+  const { provider, email, password, smtp_host, smtp_port } = req.body;
+  if (!provider || !email) {
+    return res.status(400).json({ error: 'Provider and email are required' });
+  }
+  if (provider === 'custom' && !smtp_host) {
+    return res.status(400).json({ error: 'SMTP host is required for custom provider' });
+  }
+  const configs = loadEmailConfigs();
+  const existing = configs[req.params.businessId];
+  const actualPassword = (password === '__KEEP__' && existing) ? existing.password : password;
+  if (!actualPassword) {
+    return res.status(400).json({ error: 'Password is required' });
+  }
+  configs[req.params.businessId] = {
+    provider, email, password: actualPassword,
+    smtp_host: smtp_host || '',
+    smtp_port: smtp_port || '587',
+    updated_at: new Date().toISOString(),
+  };
+  saveEmailConfigs(configs);
+  console.log(`Email config saved for business ${req.params.businessId}: ${provider} / ${email}`);
+  res.json({ success: true });
+});
+
+app.delete('/api/email-config/:businessId', (req, res) => {
+  const configs = loadEmailConfigs();
+  delete configs[req.params.businessId];
+  saveEmailConfigs(configs);
+  console.log(`Email config removed for business ${req.params.businessId}`);
+  res.json({ success: true });
+});
+
+app.post('/api/email-config/:businessId/test', async (req, res) => {
+  const { test_to } = req.body;
+  const configs = loadEmailConfigs();
+  const cfg = configs[req.params.businessId];
+  if (!cfg) return res.status(400).json({ error: 'No email configuration found. Save your settings first.' });
+
+  try {
+    const transporter = createBusinessTransporter(cfg);
+    await transporter.sendMail({
+      from: `Test <${cfg.email}>`,
+      to: test_to || cfg.email,
+      subject: 'Solis OS - Email Test',
+      html: `<div style="font-family:-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,sans-serif;max-width:500px;margin:0 auto;padding:32px">
+        <h2 style="color:#1A1D2E;margin:0 0 12px">Email Configuration Working</h2>
+        <p style="color:#6B7280;font-size:15px;line-height:1.7">Your invoice emails will now be sent from <strong>${cfg.email}</strong>.</p>
+        <p style="color:#9CA3AF;font-size:13px;margin-top:20px">This is a test email from Solis OS.</p>
+      </div>`,
+    });
+    console.log(`Test email sent from ${cfg.email} to ${test_to || cfg.email}`);
+    res.json({ success: true });
+  } catch (err) {
+    console.error('Test email failed:', err.message);
+    let hint = 'Check your email and password.';
+    if (err.message.includes('Invalid login') || err.message.includes('Authentication')) {
+      hint = 'Wrong email or app password. Make sure you are using an App Password, not your regular login password.';
+    } else if (err.message.includes('ECONNREFUSED') || err.message.includes('ENOTFOUND')) {
+      hint = 'Cannot connect to the mail server. Check the SMTP host and port.';
+    }
+    res.status(400).json({ error: hint });
+  }
+});
+
 // ── Send Invoice Email (from business name via Solis OS) ────────
 app.post('/api/send-invoice-email', async (req, res) => {
-  const { to, subject, body, html: customHtml, from_name, reply_to, invoice_image, invoice_number, total_amount, customer_name } = req.body;
+  const { to, subject, body, html: customHtml, from_name, reply_to, invoice_image, invoice_number, total_amount, customer_name, business_id } = req.body;
   if (!to || !subject) return res.status(400).json({ error: 'to and subject required' });
 
   try {
-    const senderName = from_name ? `${from_name} via Solis OS` : 'Solis OS';
-    const transporter = nodemailer.createTransport({
-      service: 'gmail',
-      auth: { user: 'solis.os.support@gmail.com', pass: 'adndusbhftozhoyw' },
-    });
+    let transporter, senderEmail, senderName;
+    const bizEmailConfig = business_id ? loadEmailConfigs()[business_id] : null;
+
+    if (bizEmailConfig) {
+      transporter = createBusinessTransporter(bizEmailConfig);
+      senderEmail = bizEmailConfig.email;
+      senderName = from_name || 'Invoice';
+    } else {
+      transporter = nodemailer.createTransport({
+        service: 'gmail',
+        auth: { user: 'solis.os.support@gmail.com', pass: 'adndusbhftozhoyw' },
+      });
+      senderEmail = 'solis.os.support@gmail.com';
+      senderName = from_name ? `${from_name} via Solis OS` : 'Solis OS';
+    }
 
     const mailOptions = {
-      from: `${senderName} <solis.os.support@gmail.com>`,
-      replyTo: reply_to || undefined,
+      from: `${senderName} <${senderEmail}>`,
+      replyTo: bizEmailConfig ? undefined : (reply_to || undefined),
       to,
       subject,
       attachments: [],
@@ -1281,12 +1403,12 @@ app.post('/api/send-invoice-email', async (req, res) => {
           </div>
           <p style="color:#6B7280;font-size:14px;line-height:1.6;margin:0">If you have any questions about this invoice, please reply to this email or contact us directly.</p>
           <div style="border-top:1px solid #E8E9EF;padding-top:16px;margin-top:24px">
-            <p style="color:#9CA3AF;font-size:12px;margin:0">Sent via Solis OS</p>
+            <p style="color:#9CA3AF;font-size:12px;margin:0">${bizEmailConfig ? `Sent by ${bizName}` : 'Sent via Solis OS'}</p>
           </div>
         </div>
       </div>`;
     } else {
-      mailOptions.html = customHtml || `<div style="font-family:-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,sans-serif;max-width:600px;margin:0 auto;background:#fff;padding:32px"><pre style="white-space:pre-wrap;font-family:inherit;font-size:14px;color:#1a1a1a;line-height:1.7">${(body || '').replace(/</g,'&lt;').replace(/>/g,'&gt;')}</pre><hr style="border:none;border-top:1px solid #E8E9EF;margin:24px 0"><p style="color:#9CA3AF;font-size:12px">Sent via Solis OS</p></div>`;
+      mailOptions.html = customHtml || `<div style="font-family:-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,sans-serif;max-width:600px;margin:0 auto;background:#fff;padding:32px"><pre style="white-space:pre-wrap;font-family:inherit;font-size:14px;color:#1a1a1a;line-height:1.7">${(body || '').replace(/</g,'&lt;').replace(/>/g,'&gt;')}</pre><hr style="border:none;border-top:1px solid #E8E9EF;margin:24px 0"><p style="color:#9CA3AF;font-size:12px">${bizEmailConfig ? `Sent by ${from_name || 'Business'}` : 'Sent via Solis OS'}</p></div>`;
     }
 
     await transporter.sendMail(mailOptions);
