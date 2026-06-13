@@ -598,13 +598,13 @@ app.post('/api/pos/sync', (req, res) => {
     let existing = {};
     try { existing = JSON.parse(fs.readFileSync(filePath, 'utf8')); } catch {}
     const payload = { businessName: businessName || existing.businessName || 'My Business', data, syncedAt: new Date().toISOString() };
-    if (products !== undefined) payload.products = products;
+    if (products !== undefined) payload.products = mergeRecords(existing.products, products);
     else if (existing.products) payload.products = existing.products;
-    if (promotions !== undefined) payload.promotions = promotions;
+    if (promotions !== undefined) payload.promotions = mergeRecords(existing.promotions, promotions);
     else if (existing.promotions) payload.promotions = existing.promotions;
-    if (staff !== undefined) payload.staff = staff;
+    if (staff !== undefined) payload.staff = mergeRecords(existing.staff, staff);
     else if (existing.staff) payload.staff = existing.staff;
-    if (customers !== undefined) payload.customers = customers;
+    if (customers !== undefined) payload.customers = mergeRecords(existing.customers, customers);
     else if (existing.customers) payload.customers = existing.customers;
     if (sales !== undefined) payload.sales = mergeRecords(existing.sales, sales);
     else if (existing.sales) payload.sales = existing.sales;
