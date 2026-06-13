@@ -524,7 +524,13 @@ app.post('/api/pos/register-sync', (req, res) => {
     const { email, syncCode } = req.body;
     if (!email || !syncCode) return res.status(400).json({ error: 'email and syncCode required' });
     const map = loadSyncMap();
-    map[email.toLowerCase()] = syncCode.toUpperCase();
+    const code = syncCode.toUpperCase();
+    const emailLower = email.toLowerCase();
+    const existingOwner = Object.entries(map).find(([e, c]) => c === code && e !== emailLower);
+    if (existingOwner) {
+      return res.status(409).json({ error: 'sync_code_taken', owner: existingOwner[0].slice(0,3) + '***' });
+    }
+    map[emailLower] = code;
     saveSyncMap(map);
     res.json({ success: true });
   } catch (err) {
