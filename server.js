@@ -603,16 +603,10 @@ app.post('/api/pos/sync', (req, res) => {
     const filePath = path.join(POS_DATA_DIR, `${code}.json`);
     let existing = {};
     try { existing = JSON.parse(fs.readFileSync(filePath, 'utf8')); } catch {}
-    const isDefaultData = businessName === 'Downtown Coffee & Market' && settings?.businessName === 'Downtown Coffee & Market';
-    const effectiveName = isDefaultData ? (existing.businessName || 'My Business') : (businessName || existing.businessName || 'My Business');
+    const effectiveName = businessName || existing.businessName || 'My Business';
     const payload = { businessName: effectiveName, data, syncedAt: new Date().toISOString() };
     if (products !== undefined) {
-      const isDefaultProducts = Array.isArray(products) && products.length > 0 && products.some(p => p.sku === 'COF-001' || p.sku === 'COF-002');
-      if (isDefaultProducts && existing.products && existing.products.length > 0 && !existing.products.some(p => p.sku === 'COF-001')) {
-        payload.products = existing.products;
-      } else {
-        payload.products = mergeRecords(existing.products, products);
-      }
+      payload.products = mergeRecords(existing.products, products);
     }
     else if (existing.products) payload.products = existing.products;
     if (promotions !== undefined) payload.promotions = mergeRecords(existing.promotions, promotions);
@@ -627,6 +621,14 @@ app.post('/api/pos/sync', (req, res) => {
       const merged = existing.settings ? { ...existing.settings } : {};
       const PROTECTED = ['purchased','purchasedAt','purchasedEmail','subscriptionEnd','cancelled'];
       const DEFAULT_VALS = {businessName:'Downtown Coffee & Market',businessAddress:'123 Main Street, Suite 100',businessPhone:'(555) 123-4567',businessEmail:'hello@example.com'};
+      const BUSINESS_KEYS = ['businessName','businessAddress','businessPhone','businessEmail'];
+      const incomingTs = settings.settingsUpdatedAt || '';
+      const existingTs = merged.settingsUpdatedAt || '';
+      if (existingTs && incomingTs && incomingTs < existingTs) {
+        for (const bk of BUSINESS_KEYS) {
+          if (settings[bk] !== undefined) delete settings[bk];
+        }
+      }
       for (const [k, v] of Object.entries(settings)) {
         if (PROTECTED.includes(k)) continue;
         if (k === 'accountCreatedAt' && merged.accountCreatedAt) continue;
