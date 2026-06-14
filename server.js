@@ -627,8 +627,10 @@ app.post('/api/pos/sync', (req, res) => {
     fs.writeFileSync(filePath, JSON.stringify(payload));
     if (email) {
       const map = loadSyncMap();
-      map[email.toLowerCase()] = code;
-      saveSyncMap(map);
+      if (!map[email.toLowerCase()]) {
+        map[email.toLowerCase()] = code;
+        saveSyncMap(map);
+      }
     }
     res.json({ success: true, syncedAt: payload.syncedAt });
   } catch (err) {
