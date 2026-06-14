@@ -616,7 +616,8 @@ app.post('/api/pos/sync', (req, res) => {
     else if (existing.sales) payload.sales = existing.sales;
     if (settings !== undefined) {
       const merged = existing.settings ? { ...existing.settings } : {};
-      for (const [k, v] of Object.entries(settings)) { merged[k] = v; }
+      const PROTECTED = ['purchased','purchasedAt','purchasedEmail','subscriptionEnd','cancelled'];
+      for (const [k, v] of Object.entries(settings)) { if (!PROTECTED.includes(k)) merged[k] = v; }
       payload.settings = merged;
     } else if (existing.settings) payload.settings = existing.settings;
     fs.writeFileSync(filePath, JSON.stringify(payload));
