@@ -80,7 +80,7 @@ async function getAIResponse(userMessage, sessionId, userName, lang) {
     }
 
     const response = await anthropic.messages.create({
-      model: 'claude-sonnet-4-20250514',
+      model: 'claude-sonnet-4-6',
       max_tokens: 300,
       system: SYSTEM_PROMPT + `\n\nThe user's name is ${userName}. Their detected language is: ${lang}. Respond in that language.`,
       messages: history,

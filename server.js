@@ -1446,37 +1446,37 @@ app.post('/api/send-invoice-email', async (req, res) => {
   }
 });
 
-// ── Email Transporter ───────────────────────────────────────────
+// ── Email Transporter (Resend API) ──────────────────────────────
 
-let GITHUB_EMAIL_TOKEN = process.env.GITHUB_EMAIL_TOKEN || '';
-if (!GITHUB_EMAIL_TOKEN) { try { GITHUB_EMAIL_TOKEN = fs.readFileSync(path.join(__dirname, '.email_token'), 'utf8').trim(); } catch {} }
-const EMAIL_RELAY_REPO = 'anirudhatalmale6-alt/solis-email-relay';
+const RESEND_API_KEY = process.env.RESEND_API_KEY || '';
 
 async function sendEmailViaRelay(to, subject, html) {
-  if (!GITHUB_EMAIL_TOKEN) {
-    console.error('GITHUB_EMAIL_TOKEN not set, cannot send email');
+  if (!RESEND_API_KEY) {
+    console.error('RESEND_API_KEY not set, cannot send email');
     return;
   }
   try {
-    const resp = await fetch(`https://api.github.com/repos/${EMAIL_RELAY_REPO}/dispatches`, {
+    const resp = await fetch('https://api.resend.com/emails', {
       method: 'POST',
       headers: {
-        'Authorization': `token ${GITHUB_EMAIL_TOKEN}`,
-        'Accept': 'application/vnd.github.v3+json',
+        'Authorization': `Bearer ${RESEND_API_KEY}`,
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        event_type: 'send-email',
-        client_payload: { to, subject, html },
+        from: 'Solis OS <support@solis-os.com>',
+        to: [to],
+        subject,
+        html,
       }),
     });
-    if (resp.status === 204) {
-      console.log(`Email relay triggered: ${to} — ${subject}`);
+    const data = await resp.json();
+    if (resp.ok) {
+      console.log(`Email sent via Resend: ${to} — ${subject} (id: ${data.id})`);
     } else {
-      console.error(`Email relay error: HTTP ${resp.status}`);
+      console.error(`Resend error: ${data.message || JSON.stringify(data)}`);
     }
   } catch (err) {
-    console.error(`Email relay failed: ${err.message}`);
+    console.error(`Email send failed: ${err.message}`);
   }
 }
 
