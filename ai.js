@@ -40,10 +40,20 @@ SOLIS OS POS (Point of Sale System):
 - Full POS system for shops, cafes, salons, supermarkets, auto parts, restaurants, retail stores
 - Pricing: $239 AUD/year, everything included, 10-day free trial, no credit card required
 - Key features: Remote management from phone (manage your shop from anywhere), barcode scanning (camera or USB/Bluetooth), inventory & stock management with low stock alerts, daily/weekly/monthly sales reports, promotions & deals engine (BOGO, percentage off, fixed discounts), multi-staff with PIN access & permissions, loyalty program with barcode cards, customer management & purchase history, receipt printing & email receipts, custom branding & 8 theme presets, works offline without internet
-- How it works: Try free for 10 days in browser, subscribe at $239 AUD/year, download for offline use on any device
+- How it works: Try free for 10 days in browser, subscribe at $239 AUD/year, install on any device for offline use
 - Remote management: Scan QR code in POS settings with phone, save to home screen, manage products/stock/promotions/sales/staff from anywhere
 - POS page: https://solis-os.com/pos.html
 - Try POS free: https://solis-os.com/app/
+- Device installation guide page: https://solis-os.com/pos.html#devices
+
+HOW TO GET SOLIS POS ON ANY DEVICE (share these instructions when asked about downloading/installing):
+- iPad / iPhone: Open solis-os.com/app in Safari. Tap the Share button (square with arrow). Scroll down and tap "Add to Home Screen". Tap Add. The Solis POS icon appears on your home screen. Opens like a native app.
+- Android Phone / Tablet: Open solis-os.com/app in Chrome. Tap the three-dot menu (top right). Tap "Install app" or "Add to Home screen". Tap Install. Works like a real app, even offline.
+- Windows PC / Laptop: Open solis-os.com/app in Chrome or Edge. Click the install icon in the address bar (or go to menu and click Install). Click Install. Creates a desktop shortcut. Works offline, no browser needed after install.
+- MacBook / iMac: Open solis-os.com/app in Chrome or Edge. Click the install icon in the address bar. Click Install. App appears in your Applications folder. Open from Launchpad or Dock.
+- Any device with a browser: Just go to solis-os.com/app and use it directly in the browser. No install required. For offline mode, follow the install steps for your specific device above.
+- IMPORTANT: No app store download is needed. Solis POS installs directly from the browser. It's a Progressive Web App (PWA) that works on every device. Up to 8 devices at once, all data syncs automatically.
+- Note for iPhone/iPad: Must use SAFARI (not Chrome). Apple only allows home screen installs from Safari.
 
 KEY SELLING POINTS:
 - AI-powered scheduling optimizes appointment slots
