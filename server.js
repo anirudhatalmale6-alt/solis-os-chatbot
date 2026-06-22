@@ -994,7 +994,7 @@ app.post('/api/pos/checkout', async (req, res) => {
       idempotency_key: idempotencyKey,
       order: {
         location_id: SQUARE_LOCATION,
-        line_items: [{ name: 'Solis OS POS — Annual Subscription (TEST)', quantity: '1', base_price_money: { amount: 100, currency: 'AUD' } }],
+        line_items: [{ name: 'Solis OS POS — Annual Subscription', quantity: '1', base_price_money: { amount: 23900, currency: 'AUD' } }],
       },
       checkout_options: { redirect_url: `https://solis-os.com/purchase-success.html?email=${encodeURIComponent(email)}` },
       pre_populated_data: { buyer_email: email },
